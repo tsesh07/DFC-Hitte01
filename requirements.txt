@@ -3,4 +3,5 @@ numpy
 geopandas 
 shapely
 plotly
-streamlit 
+streamlit
+statsmodels
