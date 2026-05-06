@@ -1,7 +1,7 @@
 pandas 
 numpy 
 geopandas 
-shapely.geometry 
+shapely
 plotly.express 
 plotly.graph_objects 
 streamlit 
