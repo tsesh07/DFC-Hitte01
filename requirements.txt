@@ -2,6 +2,5 @@ pandas
 numpy 
 geopandas 
 shapely
-plotly.express 
-plotly.graph_objects 
+plotly
 streamlit 
