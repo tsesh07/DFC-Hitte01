@@ -1,0 +1,7 @@
+pandas 
+numpy 
+geopandas 
+shapely.geometry 
+plotly.express 
+plotly.graph_objects 
+streamlit 
