@@ -1,7 +1,8 @@
-pandas 
-numpy 
-geopandas 
+streamlit
+pandas
+numpy
+geopandas
 shapely
 plotly
-streamlit
+scipy
 statsmodels

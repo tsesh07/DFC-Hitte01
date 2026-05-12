@@ -1,34 +1,62 @@
 """
-data_loader.py — Single source of truth for loading the Arduino sensor data.
+data_loader.py — Eén bron van waarheid voor het inladen van de Arduino sensor-data.
 
-Reads ../data/raw/DATA.CSV (the SD-card export, never edited) and returns a
-clean dataframe ready for the dashboard. All transformations live here so the
-pipeline is reproducible end-to-end from the original SD card export.
+Leest ../data/raw/DATA.CSV (de export van de SD-kaart, nooit aangepast) en
+levert een schoongemaakte DataFrame voor het dashboard. Alle transformaties
+leven hier zodat de pipeline reproduceerbaar is vanaf het originele bestand.
 """
 from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-# Resolve raw data path relative to this file — works regardless of cwd or deploy env
 APP_DIR = Path(__file__).parent
 RAW_PATH = APP_DIR / "data" / "raw" / "DATA.CSV"
 
-# Each walk is identified by its date prefix in the timestamp column
+# Elke wandeling identificeren we via de datum in de timestamp-kolom
 SESSIONS = {
-    "2026-05-06": "Day 1 - lid closed",
-    "2026-05-08": "Day 2 - lid open",
+    "2026-05-06": "Dag 1 - deksel dicht",
+    "2026-05-08": "Dag 2 - deksel open",
 }
 
-# Walk windows (gps_time as HHMMSS) — crop out sensor warmup/idle outside the walk.
-# Set either bound to None to keep all rows for that session.
+# Methodologische context per sessie — leeft hier zodat het dashboard en
+# eventuele analyse-scripts dezelfde bron raadplegen. Vul bij elke nieuwe
+# run dit dict aan met de relevante experimentele omstandigheden.
+SESSION_METADATA = {
+    "Dag 1 - deksel dicht": {
+        "datum":           "2026-05-06",
+        "wandel_richting": "Sarphatipark → Frans Halsbuurt → Museumplein",
+        "deksel":          "Dicht (UV-/IR-attenuatie)",
+        "hardware_status": "Stabiel — continue logging, geen onderbrekingen",
+        "bekende_issues":  "Sensor-zelfopwarming: ca. +2.2 °C drift over wandeling",
+        "rol_in_analyse":  "Primaire schone dataset",
+    },
+    "Dag 2 - deksel open": {
+        "datum":           "2026-05-08",
+        "wandel_richting": "Museumplein → Frans Halsbuurt → Sarphatipark "
+                           "(omgekeerd t.o.v. Dag 1)",
+        "deksel":          "Open",
+        "hardware_status": "USB-C stroomstoringen (beschadigde kabel)",
+        "bekende_issues":  "RTC-glitch timestamps hersteld (33 rijen); "
+                           "temperatuurpieken bij power-dropouts gemaskeerd (>50 °C)",
+        "rol_in_analyse":  "Route-omkering dient als controle voor sensor-drift; "
+                           "data-kwaliteit lager dus secundair",
+    },
+}
+
+# Wandel-vensters (gps_time als HHMMSS UTC) — knipt opwarming/idle weg.
+# Zet een grens op None om alle metingen voor die sessie te behouden.
+#
+# Dag 2: het apparaat stond al om 11:00 lokaal aan, maar de wandeling begon
+# pas rond 13:00 lokaal (= 11:00 UTC = gps_time 110000). Voor die tijd is er
+# alleen sensor-warmup zonder GPS-fix, dat willen we niet meenemen.
 WALK_WINDOWS = {
-    "Day 1 - lid closed": (121155, 130545),
-    "Day 2 - lid open":   (None, None),
+    "Dag 1 - deksel dicht": (121155, 130545),
+    "Dag 2 - deksel open":  (110000, 122635),
 }
 
 
 def _nmea_to_decimal(coord, hemi):
-    """NMEA DDDMM.MMMM + hemisphere letter -> decimal degrees."""
+    """NMEA DDDMM.MMMM + halfrond-letter -> decimale graden."""
     if pd.isna(coord) or pd.isna(hemi):
         return None
     deg = int(coord // 100)
@@ -38,11 +66,11 @@ def _nmea_to_decimal(coord, hemi):
 
 
 def _repair_corrupt_timestamps(df: pd.DataFrame) -> pd.DataFrame:
-    """Repair RTC-glitch timestamps ('2001-51-14 ...') using gps_time.
+    """Herstelt RTC-glitch timestamps ('2001-51-14 ...') op basis van gps_time.
 
-    These rows fall inside the Day 2 walk, so we reconstruct them as
-    2026-05-08 + HH:MM:SS pulled from gps_time. The gps_time column comes
-    directly from the GPS module and is unaffected by the RTC glitch.
+    Deze rijen vallen binnen de Dag-2-wandeling, dus reconstrueren we ze als
+    2026-05-08 + HH:MM:SS uit gps_time. De gps_time-kolom komt rechtstreeks
+    van de GPS-module en is niet aangetast door de RTC-storing.
     """
     bad = df["timestamp"].astype(str).str.startswith("2001")
     if not bad.any():
@@ -60,17 +88,17 @@ def _repair_corrupt_timestamps(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data
 def load_data(path: Path = RAW_PATH) -> pd.DataFrame:
-    """Load and clean the raw SD-card export.
+    """Laad en maak de ruwe SD-kaart export schoon.
 
     Pipeline:
-      1. Read raw CSV
-      2. Drop fully empty rows (Excel-saved file artifacts)
-      3. Repair RTC-glitch timestamps from gps_time
-      4. Parse timestamp -> datetime; drop any unparseable rows
-      5. Filter to our two walk dates (removes other students' April data)
-      6. Add session label column
-      7. Crop each session to its actual walk window via gps_time
-      8. Convert NMEA lat/lon to decimal degrees
+      1. Lees CSV
+      2. Verwijder volledig lege rijen (artefact van Excel-export)
+      3. Herstel RTC-glitch timestamps uit gps_time
+      4. Parse timestamp -> datetime; gooi onparseerbare rijen weg
+      5. Filter naar de twee wandeldagen (verwijdert data van andere studenten)
+      6. Voeg sessie-label toe
+      7. Knip elke sessie naar het echte wandelvenster via gps_time
+      8. Zet NMEA lat/lon om naar decimale graden
     """
     df = pd.read_csv(path)
     df = df.dropna(how="all").reset_index(drop=True)
