@@ -8,10 +8,12 @@ het vergelijken van Dag 1 (deksel dicht) vs Dag 2 (deksel open).
 Starten met:  streamlit run app.py
 """
 
+import json
 import pandas as pd
 import numpy as np
 import geopandas as gpd
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon, LineString
+from shapely.ops import linemerge, polygonize, unary_union
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -20,7 +22,7 @@ import streamlit as st
 from scipy import stats as scipy_stats
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
-# Voor KNMI-API requests
+# Voor KNMI-API requests en OSM Overpass
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -273,24 +275,56 @@ MAP_STYLES = {
 # --------------------------------------------------------------------------
 # Geo-hulpfuncties
 # --------------------------------------------------------------------------
-@st.cache_data
+@st.cache_data(ttl=86_400 * 7)
 def build_zones_gdf() -> gpd.GeoDataFrame:
-    """Bouw een GeoDataFrame van zone-polygonen.
+    """Bouw een GeoDataFrame van zone-polygonen in RD New (EPSG:28992).
 
-    Pipeline:
-      1. Maak centrum-Points in WGS84 (lat/lon, graden).
-      2. Herproject naar RD New (meters) zodat .buffer() in meters werkt.
-      3. Vervang elk centrum door een circulaire buffer met de gewenste straal.
+    Prioriteit per zone:
+      1. Gemeente Amsterdam DataPlatform (officiële bestuurlijke grenzen)
+      2. OpenStreetMap Overpass (fysieke terreincontouren)
+      3. Cirkelbuffer om het gedefinieerde middelpunt (altijd beschikbaar)
+
+    Resultaat in RD New zodat assign_zones_via_sjoin correct in meters rekent.
     """
-    rows = [{"zone": name, **spec} for name, spec in ZONES.items()]
-    gdf = gpd.GeoDataFrame(
-        rows,
-        geometry=[Point(r["lon"], r["lat"]) for r in rows],
-        crs=WGS84,
-    ).to_crs(RD_NEW)
+    ams = fetch_amsterdam_boundaries()  # Amsterdam DataPlatform
+    osm = fetch_osm_boundaries()        # OSM Overpass
 
-    gdf["geometry"] = gdf.apply(lambda row: row.geometry.buffer(row["radius_m"]), axis=1)
-    return gdf[["zone", "surface", "geometry"]]
+    geoms_rd:   list = []
+    zone_names: list = []
+    zone_surfs: list = []
+    sources:    list = []   # voor eventuele debug-logging
+
+    for name, spec in ZONES.items():
+        latlon = ams.get(name) or osm.get(name) or []
+
+        if len(latlon) > 3:
+            source = "Amsterdam API" if name in ams else "OSM"
+            poly_wgs = Polygon([(c[1], c[0]) for c in latlon])
+            geom = (
+                gpd.GeoDataFrame([{}], geometry=[poly_wgs], crs=WGS84)
+                .to_crs(RD_NEW)
+                .geometry.iloc[0]
+            )
+        else:
+            source = "cirkel (fallback)"
+            pt_rd = (
+                gpd.GeoDataFrame([{}], geometry=[Point(spec["lon"], spec["lat"])], crs=WGS84)
+                .to_crs(RD_NEW)
+                .geometry.iloc[0]
+            )
+            geom = pt_rd.buffer(spec["radius_m"])
+
+        geoms_rd.append(geom)
+        zone_names.append(name)
+        zone_surfs.append(spec["surface"])
+        sources.append(source)
+
+    gdf = gpd.GeoDataFrame(
+        {"zone": zone_names, "surface": zone_surfs, "_source": sources},
+        geometry=geoms_rd,
+        crs=RD_NEW,
+    )
+    return gdf[["zone", "surface", "_source", "geometry"]]
 
 
 def assign_zones_via_sjoin(df: pd.DataFrame, zones_gdf: gpd.GeoDataFrame) -> pd.Series:
@@ -405,6 +439,180 @@ def clean_sensor_data(df: pd.DataFrame, drop_glitches: bool) -> pd.DataFrame:
 # een mislukte fetch wordt automatisch opnieuw geprobeerd.
 KNMI_ENDPOINT = "https://www.daggegevens.knmi.nl/klimatologie/uurgegevens"
 KNMI_STATION_SCHIPHOL = 240
+
+# --------------------------------------------------------------------------
+# OpenStreetMap Overpass — echte zone-grenzen
+# --------------------------------------------------------------------------
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# Bounding box ruim rond Museumkwartier / Oud-Zuid
+_OSM_BBOX = "52.34,4.86,52.37,4.92"
+
+# Overpass QL queries per zone.
+# Sarphatipark en Museumplein zijn gesloten 'way'-elementen (enkelvoudige
+# polygonen). Frans Halsbuurt is een buurtgrens die als 'relation' bestaat;
+# de fallback probeert ook een way met dezelfde naam.
+_OSM_QUERIES = {
+    "Sarphatipark": (
+        f'[out:json][timeout:15];'
+        f'way["name"="Sarphatipark"]["leisure"="park"]({_OSM_BBOX});'
+        f'out geom;'
+    ),
+    # Museumplein kan in OSM als park, recreatieterrein of plein getagd zijn;
+    # we proberen alle drie in één union-query zodat altijd de grootste gesloten
+    # way als buitengrens wordt teruggegeven.
+    "Museumplein": (
+        f'[out:json][timeout:15];'
+        f'('
+        f'  way["name"="Museumplein"]["leisure"="park"]({_OSM_BBOX});'
+        f'  way["name"="Museumplein"]["landuse"="recreation_ground"]({_OSM_BBOX});'
+        f'  way["name"="Museumplein"]["place"="square"]({_OSM_BBOX});'
+        f'  way["name"="Museumplein"]["leisure"="common"]({_OSM_BBOX});'
+        f');'
+        f'out geom;'
+    ),
+    "Frans Halsbuurt": (
+        f'[out:json][timeout:15];'
+        f'(relation["name"="Frans Halsbuurt"]({_OSM_BBOX});'
+        f'way["name"="Frans Halsbuurt"]({_OSM_BBOX}););'
+        f'out geom members;'
+    ),
+}
+
+
+@st.cache_data(ttl=86_400 * 7, show_spinner=False)
+def fetch_osm_boundaries() -> dict[str, list[tuple[float, float]]]:
+    """Haal echte OSM-polygoonranden op voor de drie meetzones.
+
+    Geeft per zone een lijst van (lat, lon)-tuples terug die de buitenrand
+    van het vlak beschrijven. Bij een netwerk- of parsefout voor een zone
+    wordt die zone niet in de dict opgenomen — build_zones_gdf() valt dan
+    terug op de cirkelbuffer voor die zone.
+
+    Resultaat wordt 7 dagen gecached; grenzen veranderen zelden.
+    """
+    boundaries: dict[str, list[tuple[float, float]]] = {}
+
+    for zone, query in _OSM_QUERIES.items():
+        try:
+            post_data = urllib.parse.urlencode({"data": query}).encode()
+            req = urllib.request.Request(
+                OVERPASS_URL,
+                data=post_data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent":   "microclimate-dashboard/1.0",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            continue  # silently fall back to circle for this zone
+
+        coords: list[tuple[float, float]] = []
+
+        # Fase 1: verzamel alle gesloten way-elementen en neem de grootste.
+        # Bij een union-query (bijv. Museumplein) komen meerdere ways terug;
+        # de langste way is normaal de buitenrand van het gehele terrein.
+        way_candidates: list[list[tuple[float, float]]] = []
+        for el in result.get("elements", []):
+            if el["type"] == "way" and "geometry" in el:
+                pts = [(pt["lat"], pt["lon"]) for pt in el["geometry"]]
+                if len(pts) > 3:
+                    way_candidates.append(pts)
+
+        if way_candidates:
+            coords = max(way_candidates, key=len)
+
+        # Fase 2: als geen bruikbare way gevonden, probeer relation-leden samen te voegen.
+        # Dit is de fallback voor Frans Halsbuurt als OSM-query wordt gebruikt.
+        if not coords:
+            for el in result.get("elements", []):
+                if el["type"] == "relation":
+                    lines = []
+                    for member in el.get("members", []):
+                        if (member.get("type") == "way"
+                                and member.get("role") in ("outer", "")
+                                and "geometry" in member):
+                            pts = [(pt["lon"], pt["lat"]) for pt in member["geometry"]]
+                            if len(pts) >= 2:
+                                lines.append(LineString(pts))
+                    if lines:
+                        merged = linemerge(lines)
+                        polys  = list(polygonize(merged))
+                        if polys:
+                            outer = unary_union(polys)
+                            if outer.geom_type == "MultiPolygon":
+                                outer = max(outer.geoms, key=lambda g: g.area)
+                            coords = [(y, x) for x, y in outer.exterior.coords]
+                            break
+
+        if len(coords) > 3:
+            boundaries[zone] = coords
+
+    return boundaries
+
+
+# --------------------------------------------------------------------------
+# Gemeente Amsterdam DataPlatform — officiële buurt-/gebiedsgrenzen
+# --------------------------------------------------------------------------
+AMS_API_BASE = "https://api.data.amsterdam.nl/v1"
+
+
+@st.cache_data(ttl=86_400 * 7, show_spinner=False)
+def fetch_amsterdam_boundaries() -> dict[str, list[tuple[float, float]]]:
+    """Haal officiële polygoonranden op van de Gemeente Amsterdam DataPlatform API.
+
+    Momenteel ondersteund:
+      • Frans Halsbuurt — gebieden/buurten (officiële buurtgrens, veel preciezer
+        dan de OSM-relatie die soms onvolledige leden heeft).
+
+    Geeft {zone_naam: [(lat, lon), ...]} terug.
+    Bij netwerk- of parsefout wordt die zone stilletjes overgeslagen;
+    build_zones_gdf() valt dan terug op de OSM-query of cirkelbuffer.
+    """
+    boundaries: dict[str, list[tuple[float, float]]] = {}
+
+    # --- Frans Halsbuurt: officiële buurtgrens --------------------------------
+    # De Amsterdam DataPlatform v1 API geeft met ?_format=geojson standaard
+    # WGS84-coördinaten terug in GeoJSON-volgorde [lon, lat].
+    try:
+        url = (
+            f"{AMS_API_BASE}/gebieden/buurten/"
+            "?naam=Frans+Halsbuurt&_format=geojson"
+        )
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "microclimate-dashboard/1.0",
+                "Accept":     "application/geo+json, application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        for feature in data.get("features", []):
+            geom  = feature.get("geometry", {})
+            gtype = geom.get("type", "")
+
+            if gtype == "Polygon":
+                ring = geom["coordinates"][0]
+            elif gtype == "MultiPolygon":
+                # Neem de ring met de meeste punten (grootste buitenring)
+                ring = max(geom["coordinates"], key=lambda p: len(p[0]))[0]
+            else:
+                continue
+
+            if len(ring) > 3:
+                # GeoJSON-coördinaten zijn [lon, lat] → omzetten naar (lat, lon)
+                boundaries["Frans Halsbuurt"] = [
+                    (float(c[1]), float(c[0])) for c in ring
+                ]
+                break
+    except Exception:
+        pass  # stille fallback naar OSM / cirkel
+
+    return boundaries
 
 
 class KNMIFetchError(Exception):
@@ -684,6 +892,13 @@ df = add_drift_correction(df)
 
 zones_gdf = build_zones_gdf()
 df["zone"] = assign_zones_via_sjoin(df, zones_gdf)
+
+# Toon databron per zone in de zijbalk (Amsterdam API / OSM / cirkel)
+_source_icons = {"Amsterdam API": "🏛️", "OSM": "🗺️", "cirkel (fallback)": "⭕"}
+with st.sidebar.expander("📍 Zonegrenzen — databron", expanded=False):
+    for _, zrow in zones_gdf.iterrows():
+        icon = _source_icons.get(zrow["_source"], "•")
+        st.caption(f"{icon} **{zrow['zone']}**: {zrow['_source']}")
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
 # Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
@@ -1035,8 +1250,7 @@ if knmi_per_session:
 with st.expander("📝 Methodologische context per sessie", expanded=False):
     st.caption(
         "Het experimentele ontwerp van elke wandeling wordt hier expliciet "
-        "gedocumenteerd voor reproduceerbaarheid. Vul `SESSION_METADATA` in "
-        "`data_loader.py` aan voor toekomstige metingen."
+        "gedocumenteerd voor reproduceerbaarheid."
     )
     meta_cols = st.columns(len(session_order))
     for col_st, s in zip(meta_cols, session_order):
@@ -1336,7 +1550,7 @@ with tab_map:
                 hoverinfo="text",
             ))
 
-        # --- Zone-cirkels en centroid-labels ---
+        # --- Zone-vlakken (gevuld) en centroid-labels ---
         zones_wgs84 = zones_gdf.to_crs(WGS84)
         for _, zrow in zones_wgs84.iterrows():
             zname  = zrow["zone"]
@@ -1344,14 +1558,20 @@ with tab_map:
             coords = list(zrow.geometry.exterior.coords)
             z_lons = [c[0] for c in coords] + [coords[0][0]]
             z_lats = [c[1] for c in coords] + [coords[0][1]]
+            # Converteer hex → rgba voor halftransparante vulling
+            _h = zcolor.lstrip("#")
+            _r, _g, _b = int(_h[0:2], 16), int(_h[2:4], 16), int(_h[4:6], 16)
+            fill_rgba = f"rgba({_r},{_g},{_b},0.18)"
             fig.add_trace(go.Scattermap(
                 lat=z_lats, lon=z_lons,
                 mode="lines",
+                fill="toself",
+                fillcolor=fill_rgba,
                 line=dict(color=zcolor, width=2.5),
                 name=f"Zone: {zname}",
                 hoverinfo="skip",
                 showlegend=False,
-                opacity=0.85,
+                opacity=0.9,
             ))
             centroid = zrow.geometry.centroid
             fig.add_trace(go.Scattermap(
