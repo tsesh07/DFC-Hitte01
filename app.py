@@ -38,6 +38,162 @@ st.set_page_config(
 )
 
 # --------------------------------------------------------------------------
+# Custom CSS — Urban Dark theme
+# --------------------------------------------------------------------------
+st.markdown("""
+<style>
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.main .block-container { padding: 1.5rem 3rem 3rem; max-width: 1400px; }
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] { border-right: 1px solid #334155; }
+section[data-testid="stSidebar"] hr { border-color: #334155 !important; opacity:1; }
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #1e293b;
+    border-radius: 10px;
+    padding: 5px 6px;
+    gap: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 7px !important;
+    color: #94a3b8 !important;
+    font-weight: 500;
+    padding: 8px 18px !important;
+    transition: color 0.15s !important;
+    border: none !important;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #e2e8f0 !important; }
+.stTabs [aria-selected="true"] {
+    background: #38bdf8 !important;
+    color: #0f172a !important;
+    font-weight: 700 !important;
+}
+
+/* ── Metric cards ───────────────────────────────────────────────────────── */
+[data-testid="metric-container"] {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(56,189,248,0.15);
+}
+[data-testid="stMetricValue"] { color: #38bdf8 !important; }
+[data-testid="stMetricLabel"] { color: #94a3b8 !important; font-size: .85rem !important; }
+[data-testid="stMetricDelta"] { color: #64748b !important; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.stButton > button, .stDownloadButton > button {
+    background: linear-gradient(135deg, #0369a1, #0891b2) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    letter-spacing: .3px;
+    transition: all 0.2s ease !important;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+    background: linear-gradient(135deg, #0284c7, #06b6d4) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 14px rgba(56,189,248,0.35) !important;
+}
+
+/* ── Expanders ──────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 10px !important;
+}
+
+/* ── DataFrames ─────────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border: 1px solid #334155 !important;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+/* ── Dividers ───────────────────────────────────────────────────────────── */
+hr { border-color: #334155 !important; opacity: 1; }
+
+/* ── Insight cards (custom HTML components) ─────────────────────────────── */
+.insight-card {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 1.35rem 1.5rem;
+    border-left: 4px solid #38bdf8;
+    height: 100%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    min-height: 130px;
+}
+.insight-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+}
+.insight-card--blue  { border-left-color: #38bdf8; }
+.insight-card--amber { border-left-color: #f59e0b; }
+.insight-card--green { border-left-color: #10b981; }
+.insight-card .card-title {
+    color: #f1f5f9;
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 .55rem;
+}
+.insight-card .card-body {
+    color: #94a3b8;
+    font-size: .875rem;
+    line-height: 1.65;
+    margin: 0;
+}
+.insight-card .card-body strong { color: #e2e8f0; }
+
+/* ── Hero banner ────────────────────────────────────────────────────────── */
+.hero-banner {
+    background: linear-gradient(135deg, #1e3a5f 0%, #0f4c75 45%, #0d9488 100%);
+    border-radius: 16px;
+    padding: 2.25rem 2.75rem;
+    margin-bottom: 1.75rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    border: 1px solid #1e4a6e;
+}
+.hero-banner h1 {
+    color: #fff !important;
+    font-size: 1.95rem !important;
+    font-weight: 800 !important;
+    margin: 0 0 .4rem !important;
+    letter-spacing: -.5px;
+}
+.hero-banner .hero-sub {
+    color: rgba(255,255,255,.8);
+    font-size: .98rem;
+    margin: 0 0 .25rem;
+}
+.hero-banner .hero-meta {
+    color: rgba(255,255,255,.6);
+    font-size: .84rem;
+    margin: 0;
+}
+
+/* ── Section header accent ──────────────────────────────────────────────── */
+.section-header {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    padding-bottom: .45rem;
+    border-bottom: 2px solid #334155;
+    margin-bottom: 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------------------------------
 # Coördinatensystemen
 # --------------------------------------------------------------------------
 # WGS84 (EPSG:4326)   — standaard "GPS" CRS, lat/lon in graden.
@@ -195,6 +351,32 @@ def add_minutes_from_start(df: pd.DataFrame) -> pd.DataFrame:
     df["minute_from_start"] = df.groupby("session")["timestamp"].transform(
         lambda x: (x - x.min()).dt.total_seconds() / 60
     )
+    return df
+
+
+def add_drift_correction(df: pd.DataFrame) -> pd.DataFrame:
+    """Subtract per-session linear self-heating drift from tempC.
+
+    The Arduino board warms up over the walk, producing a systematic upward
+    trend in tempC unrelated to the urban environment. This fits a linear
+    regression (tempC ~ minute_from_start) per session and subtracts the
+    trend while preserving each session's mean temperature. The result,
+    tempC_detrended, isolates the spatial microclimate signal from the
+    instrument drift.
+    """
+    df = df.copy()
+    df["tempC_detrended"] = np.nan
+    for s, grp in df.groupby("session"):
+        valid = grp["tempC"].notna() & grp["minute_from_start"].notna()
+        if valid.sum() < 10:
+            continue
+        x = grp.loc[valid, "minute_from_start"].values
+        y = grp.loc[valid, "tempC"].values
+        slope, *_ = scipy_stats.linregress(x, y)
+        mean_x = x.mean()
+        df.loc[grp.index, "tempC_detrended"] = (
+            grp["tempC"] - slope * (grp["minute_from_start"] - mean_x)
+        )
     return df
 
 
@@ -462,68 +644,34 @@ st.sidebar.caption(
 )
 
 # --------------------------------------------------------------------------
-# Handmatige KNMI-overschrijving (fallback wanneer API niet werkt)
+# Handmatige KNMI-invoer (fallback wanneer auto-fetch faalt)
 # --------------------------------------------------------------------------
-# KNMI valideert zeer recente uurgegevens vaak pas na enkele dagen, dus voor
-# wandelingen van afgelopen week werkt de automatische fetch niet altijd.
-# Hier kan je de KNMI-waarden handmatig invoeren — bv. afgelezen van
-# weerlive.nl, de KNMI-website, of een weerstation in de buurt.
 with st.sidebar.expander("🌤️ KNMI handmatig instellen", expanded=False):
     st.caption(
-        "Wanneer de automatische KNMI-fetch leeg blijft (recente data is "
-        "vaak nog niet gevalideerd), kun je hier zelf de waarden invullen "
-        "voor de wandel-uren. Deze overschrijven de automatische data."
+        "Vul handmatige waarden in als de automatische KNMI-fetch faalt "
+        "(recente data heeft doorgaans enkele dagen validatievertraging). "
+        "Lege velden vallen terug op de auto-fetch."
     )
-    manual_knmi: dict[str, dict] = {}
     use_manual = st.toggle("Handmatige waarden gebruiken", value=False)
+    manual_knmi: dict[str, dict] = {}
     if use_manual:
         for s in available_sessions:
             st.markdown(f"**{s}**")
-            t = st.number_input(f"Temperatuur (°C) — {s}",
-                                value=16.0, step=0.1, key=f"knmi_t_{s}")
-            w = st.number_input(f"Wind (m/s) — {s}",
-                                value=3.0, step=0.1, key=f"knmi_w_{s}")
-            c = st.slider(f"Bewolking (okta 0–9) — {s}",
-                          0, 9, 4, key=f"knmi_c_{s}")
+            c_a, c_b = st.columns(2)
             manual_knmi[s] = {
-                "temp_C":         t,
-                "wind_ms":        w,
-                "cloud_okta":     float(c),
-                "radiation_jcm2": float("nan"),  # niet aflesbaar van weerapps
-                "hours_covered":  "handmatig ingevoerd",
+                "temp_C":         c_a.number_input(
+                    "Temp °C", value=None, placeholder="auto",
+                    key=f"mk_temp_{s}", step=0.1, format="%.1f"),
+                "wind_ms":        c_b.number_input(
+                    "Wind m/s", value=None, placeholder="auto",
+                    key=f"mk_wind_{s}", step=0.1, format="%.1f"),
+                "cloud_okta":     c_a.number_input(
+                    "Bewolking (0-9)", value=None, placeholder="auto",
+                    key=f"mk_cloud_{s}", step=1.0, min_value=0.0, max_value=9.0),
+                "radiation_jcm2": c_b.number_input(
+                    "Straling J/cm²", value=None, placeholder="auto",
+                    key=f"mk_rad_{s}", step=10.0),
             }
-
-# --------------------------------------------------------------------------
-# Handmatige KNMI-invoer (fallback wanneer auto-fetch faalt)
-# --------------------------------------------------------------------------
-# KNMI's klimatologische uurgegevens hebben een vertraging van enkele dagen
-# (validatie tijdens kantooruren). Voor recente metingen kun je hier de
-# omgevingsgegevens handmatig invoeren — bv. afgelezen van Weeronline of
-# je iPhone-weerapp tijdens de wandeling. Deze waarden overschrijven de
-# auto-fetch als ze ingevuld zijn.
-with st.sidebar.expander("🌤️ KNMI handmatig invoeren (fallback)", expanded=False):
-    st.caption(
-        "Vul in als de automatische KNMI-fetch faalt. Lege velden gebruiken "
-        "de auto-fetch (indien beschikbaar)."
-    )
-    manual_knmi: dict[str, dict] = {}
-    for s in available_sessions:
-        st.markdown(f"**{s}**")
-        c_a, c_b = st.columns(2)
-        manual_knmi[s] = {
-            "temp_C":     c_a.number_input(
-                "Temp °C", value=None, placeholder="auto",
-                key=f"mk_temp_{s}", step=0.1, format="%.1f"),
-            "wind_ms":    c_b.number_input(
-                "Wind m/s", value=None, placeholder="auto",
-                key=f"mk_wind_{s}", step=0.1, format="%.1f"),
-            "cloud_okta": c_a.number_input(
-                "Bewolking (0-9)", value=None, placeholder="auto",
-                key=f"mk_cloud_{s}", step=1.0, min_value=0.0, max_value=9.0),
-            "radiation_jcm2": c_b.number_input(
-                "Straling J/cm²", value=None, placeholder="auto",
-                key=f"mk_rad_{s}", step=10.0),
-        }
 
 # --------------------------------------------------------------------------
 # Filter & verrijk de DataFrame
@@ -532,10 +680,20 @@ df = raw[raw["session"].isin(sessions)].copy()
 df = clean_sensor_data(df, drop_glitches)
 df = add_track_metrics(df)
 df = add_minutes_from_start(df)
+df = add_drift_correction(df)
 
 zones_gdf = build_zones_gdf()
 df["zone"] = assign_zones_via_sjoin(df, zones_gdf)
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
+
+# Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
+_hard_mean  = df[df["zone"].isin(["Museumplein", "Frans Halsbuurt"])]["tempC_detrended"].mean()
+_green_mean = df[df["zone"] == "Sarphatipark"]["tempC_detrended"].mean()
+uhi_index = (
+    round(float(_hard_mean - _green_mean), 2)
+    if (not np.isnan(_hard_mean) and not np.isnan(_green_mean))
+    else None
+)
 
 is_compare = len(sessions) > 1
 session_order = [s for s in available_sessions if s in sessions]
@@ -554,9 +712,11 @@ for s in session_order:
     if sub.empty:
         continue
 
-    # Eerst handmatige overschrijving controleren — heeft prioriteit
-    if use_manual and s in manual_knmi:
-        knmi_per_session[s] = manual_knmi[s]
+    # Handmatige overschrijving heeft prioriteit; alleen non-None velden worden gebruikt
+    mk = manual_knmi.get(s, {})
+    mk_filled = {k: v for k, v in mk.items() if v is not None}
+    if use_manual and mk_filled:
+        knmi_per_session[s] = {**mk_filled, "hours_covered": "handmatig ingevoerd"}
         continue
 
     # Anders automatische KNMI-fetch
@@ -592,25 +752,36 @@ if knmi_errors:
         )
 
 # --------------------------------------------------------------------------
-# Header
+# Hero header
 # --------------------------------------------------------------------------
-st.title("📡 Arduino Sensor Logger Dashboard")
-st.markdown(
-    "Stadsmicroklimaat-veldwerk in Amsterdam — Museumplein, Frans Halsbuurt en Sarphatipark."
-)
-
 if is_compare:
-    st.caption(
-        f"Vergelijking van **{len(sessions)} sessies** "
-        f"({', '.join(sessions)}) — {len(df):,} metingen totaal."
+    _meta_line = (
+        f"Vergelijking van <strong>{len(sessions)} sessies</strong> "
+        f"({', '.join(sessions)}) &mdash; {len(df):,} metingen totaal."
     )
 else:
-    only = sessions[0]
-    sub = df[df["session"] == only]
-    st.caption(
-        f"**{only}** — {len(sub):,} metingen van "
-        f"{sub['timestamp'].min():%Y-%m-%d %H:%M:%S} tot {sub['timestamp'].max():%H:%M:%S}."
+    _only = sessions[0]
+    _sub  = df[df["session"] == _only]
+    _meta_line = (
+        f"<strong>{_only}</strong> &mdash; {len(_sub):,} metingen van "
+        f"{_sub['timestamp'].min():%Y-%m-%d %H:%M} tot {_sub['timestamp'].max():%H:%M}."
     )
+
+st.markdown(f"""
+<div class="hero-banner">
+  <div style="display:flex;align-items:center;gap:1.5rem;">
+    <span style="font-size:3.2rem;line-height:1;">📡</span>
+    <div>
+      <h1>Arduino Sensor Logger Dashboard</h1>
+      <p class="hero-sub">
+        Stadsmicroklimaat-veldwerk in Amsterdam &mdash;
+        Museumplein, Frans Halsbuurt en Sarphatipark
+      </p>
+      <p class="hero-meta">{_meta_line}</p>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 if df.empty:
     st.warning("Geen rijen voldoen aan de huidige filters.")
@@ -647,27 +818,36 @@ col1, col2, col3 = st.columns(3)
 with col1:
     total_n = len(df)
     n_zones = df[df["zone"] != "Onderweg"]["zone"].nunique()
-    st.info(
-        f"### 📊 Dataset\n"
-        f"**{total_n:,}** metingen verzameld over **{len(session_order)} sessie(s)** "
-        f"in **{n_zones} stadszones**."
+    st.markdown(
+        f"""<div class="insight-card insight-card--blue">
+          <p class="card-title">📊 Dataset</p>
+          <p class="card-body">
+            <strong>{total_n:,}</strong> metingen verzameld over
+            <strong>{len(session_order)} sessie(s)</strong> in
+            <strong>{n_zones} stadszones</strong>.
+          </p>
+        </div>""",
+        unsafe_allow_html=True,
     )
 
 # Kaart 2: temperatuur-drift (kalibratie-uitdaging)
 with col2:
     if "Dag 1 - deksel dicht" in stats_per_session:
         d = stats_per_session["Dag 1 - deksel dicht"]
-        drift_text = f"**+{d['drift']:.1f} °C** over {d['duration_min']:.0f} min"
-        st.warning(
-            f"### 🌡️ Sensor-drift\n"
-            f"Op Dag 1 steeg de gemeten temperatuur met {drift_text} — "
+        drift_body = (
+            f"Op Dag 1 steeg de gemeten temperatuur met "
+            f"<strong>+{d['drift']:.1f} °C</strong> over {d['duration_min']:.0f} min &mdash; "
             f"vermoedelijk zelf-opwarming van het board, niet de stad zelf."
         )
     else:
-        st.warning(
-            f"### 🌡️ Sensor-kalibratie\n"
-            f"Selecteer beide sessies om de drift-vergelijking te zien."
-        )
+        drift_body = "Selecteer beide sessies om de drift-vergelijking te zien."
+    st.markdown(
+        f"""<div class="insight-card insight-card--amber">
+          <p class="card-title">🌡️ Sensor-drift</p>
+          <p class="card-body">{drift_body}</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 # Kaart 3: belangrijkste bevinding van de route-omkering (Museumplein test)
 with col3:
@@ -678,19 +858,54 @@ with col3:
             mp_per_session[s] = mp_sub.mean()
     if len(mp_per_session) == 2:
         diff = list(mp_per_session.values())[1] - list(mp_per_session.values())[0]
-        st.success(
-            f"### 🔄 Route-omkering test\n"
-            f"Museumplein in beide volgordes: **{list(mp_per_session.values())[0]:.1f} °C** "
-            f"vs **{list(mp_per_session.values())[1]:.1f} °C** "
-            f"(Δ = {diff:+.2f} °C). "
+        route_body = (
+            f"Museumplein in beide volgordes: "
+            f"<strong>{list(mp_per_session.values())[0]:.1f} °C</strong> vs "
+            f"<strong>{list(mp_per_session.values())[1]:.1f} °C</strong> "
+            f"(&Delta; = {diff:+.2f} °C). "
             f"Suggereert dat eerdere zone-effecten deels drift waren."
         )
     else:
-        st.success(
-            f"### 🔄 Methodologie\n"
-            f"Dag 1 (Sarphatipark → Museumplein) vs Dag 2 (Museumplein → Sarphatipark): "
-            f"route-omkering controleert voor sensor-drift."
+        route_body = (
+            "Dag 1 (Sarphatipark &rarr; Museumplein) vs Dag 2 (Museumplein &rarr; Sarphatipark): "
+            "route-omkering controleert voor sensor-drift."
         )
+    st.markdown(
+        f"""<div class="insight-card insight-card--green">
+          <p class="card-title">🔄 Route-omkering test</p>
+          <p class="card-body">{route_body}</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+# --- Urban Heat Island index banner ---
+if uhi_index is not None:
+    _uhi_color   = "#ef4444" if uhi_index > 0 else "#10b981"
+    _uhi_sign    = "warmer" if uhi_index > 0 else "koeler"
+    _uhi_context = (
+        f"Verhard (Museumplein + Frans Halsbuurt) is gemiddeld "
+        f"<strong style='color:{_uhi_color}'>{abs(uhi_index):.2f} °C {_uhi_sign}</strong> "
+        f"dan Sarphatipark (boomkroon) — berekend op drift-gecorrigeerde temperatuur."
+    )
+    st.markdown(f"""
+    <div style="background:#1e293b; border:1px solid #334155; border-radius:14px;
+                padding:1.1rem 1.6rem; margin:.8rem 0 1.2rem;
+                display:flex; align-items:center; gap:1.4rem;">
+      <span style="font-size:2.6rem; line-height:1;">🏙️</span>
+      <div>
+        <div style="color:#94a3b8; font-size:.75rem; font-weight:700;
+                    text-transform:uppercase; letter-spacing:.07em; margin-bottom:.25rem;">
+          Urban Heat Island Index &nbsp;·&nbsp; drift-gecorrigeerd
+        </div>
+        <div style="color:{_uhi_color}; font-size:2.1rem; font-weight:800; line-height:1.15;">
+          {uhi_index:+.2f} °C
+        </div>
+        <div style="color:#64748b; font-size:.82rem; margin-top:.2rem;">
+          {_uhi_context}
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # --- Kern-KPI-tabel: zichtbaar samengevat ---
 st.markdown("### 📋 Samenvatting per sessie")
@@ -765,7 +980,8 @@ fig_headline = px.scatter(
     },
     color_discrete_map=SESSION_COLOURS if is_compare else ZONE_COLOURS,
     symbol="zone" if is_compare else None,
-    opacity=0.55,
+    opacity=0.65,
+    template="plotly_dark",
     labels={
         "minute_from_start": "Minuten sinds start van de sessie",
         "tempC": "Temperatuur (°C)",
@@ -775,9 +991,15 @@ fig_headline = px.scatter(
 )
 fig_headline.update_traces(marker=dict(size=7))
 fig_headline.update_layout(
-    height=380, margin=dict(l=10, r=10, t=10, b=10),
+    height=400,
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="#1e293b",
+    margin=dict(l=10, r=10, t=10, b=10),
     legend_title_text="",
     hovermode="closest",
+    xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+    yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+    legend=dict(bgcolor="rgba(30,41,59,0.85)", bordercolor="#334155", borderwidth=1),
 )
 
 # Voeg KNMI omgevingstemperatuur als horizontale referentielijn toe per sessie.
@@ -864,10 +1086,11 @@ with tab_time:
         )
 
     sensor_meta = {
-        "tempC":        ("Temperatuur (°C)",        "#ef4444"),
-        "pressure_hPa": ("Luchtdruk (hPa)",         "#3b82f6"),
-        "light_lux":    ("Licht (lux)",             "#eab308"),
-        "mq_raw":       ("MQ gassensor (ruw)",      "#10b981"),
+        "tempC":            ("Temperatuur (°C)",                  "#ef4444"),
+        "tempC_detrended":  ("Temp. drift-gecorrigeerd (°C)",     "#f97316"),
+        "pressure_hPa":     ("Luchtdruk (hPa)",                   "#3b82f6"),
+        "light_lux":        ("Licht (lux)",                       "#eab308"),
+        "mq_raw":           ("MQ gassensor (ruw)",                "#10b981"),
     }
 
     selected = st.multiselect(
@@ -888,19 +1111,25 @@ with tab_time:
                 color="session",
                 category_orders={"session": session_order},
                 color_discrete_map=SESSION_COLOURS,
+                template="plotly_dark",
                 title=label,
                 labels={"minute_from_start": "Minuten sinds start"},
             )
         else:
-            fig = px.line(df, x="timestamp", y=col, title=label)
+            fig = px.line(df, x="timestamp", y=col,
+                          template="plotly_dark", title=label)
             fig.update_traces(line=dict(color=sensor_color, width=2))
 
         fig.update_layout(
             height=300,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#1e293b",
             margin=dict(l=10, r=10, t=40, b=10),
-            xaxis_title=("Minuten sinds start" if is_compare else None),
-            yaxis_title=label,
-            legend_title_text="" if is_compare else None,
+            xaxis=dict(title="Minuten sinds start" if is_compare else None,
+                       gridcolor="#334155", zerolinecolor="#475569"),
+            yaxis=dict(title=label, gridcolor="#334155", zerolinecolor="#475569"),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
         )
         if col == "light_lux" and log_light:
             fig.update_yaxes(type="log")
@@ -953,6 +1182,7 @@ with tab_map:
             colour_options = {
                 "Tijdsverloop":                          "_time_idx",
                 "Temperatuur-afwijking (Δ van gem.)":    "tempC_anomaly",
+                "Temp. drift-gecorrigeerd (°C)":         "tempC_detrended",
                 "Snelheid (km/h)":                       "speed_kmh",
                 "Temperatuur (°C)":                      "tempC",
                 "Luchtdruk (hPa)":                       "pressure_hPa",
@@ -1106,6 +1336,33 @@ with tab_map:
                 hoverinfo="text",
             ))
 
+        # --- Zone-cirkels en centroid-labels ---
+        zones_wgs84 = zones_gdf.to_crs(WGS84)
+        for _, zrow in zones_wgs84.iterrows():
+            zname  = zrow["zone"]
+            zcolor = ZONE_COLOURS.get(zname, "#ffffff")
+            coords = list(zrow.geometry.exterior.coords)
+            z_lons = [c[0] for c in coords] + [coords[0][0]]
+            z_lats = [c[1] for c in coords] + [coords[0][1]]
+            fig.add_trace(go.Scattermap(
+                lat=z_lats, lon=z_lons,
+                mode="lines",
+                line=dict(color=zcolor, width=2.5),
+                name=f"Zone: {zname}",
+                hoverinfo="skip",
+                showlegend=False,
+                opacity=0.85,
+            ))
+            centroid = zrow.geometry.centroid
+            fig.add_trace(go.Scattermap(
+                lat=[centroid.y], lon=[centroid.x],
+                mode="text",
+                text=[zname],
+                textfont=dict(size=12, color=zcolor),
+                hoverinfo="skip",
+                showlegend=False,
+            ))
+
         # Auto-zoom om de route te omsluiten
         center_lat = gps["lat_dec"].mean()
         center_lon = gps["lon_dec"].mean()
@@ -1116,16 +1373,16 @@ with tab_map:
         zoom = 15 if span < 0.01 else 14 if span < 0.03 else 13
 
         show_legend = is_compare or (not is_compare and colour_col == "zone")
-        # Scattermap (MapLibre) gebruikt `map=` in plaats van `mapbox=`.
-        # De ingebouwde zoom-/pan-controls zijn responsiever dan de oude
-        # Mapbox-versie en vereisen geen Mapbox-token.
         fig.update_layout(
             map=dict(style=map_style,
                      center=dict(lat=center_lat, lon=center_lon),
                      zoom=zoom),
-            height=620,
+            height=640,
             margin=dict(l=0, r=0, t=0, b=0),
             showlegend=show_legend,
+            paper_bgcolor="rgba(0,0,0,0)",
+            legend=dict(bgcolor="rgba(15,23,42,0.85)", bordercolor="#334155",
+                        borderwidth=1, font=dict(color="#cbd5e1")),
         )
         # Activeer de ingebouwde modebar-acties expliciet zodat zoom-knoppen
         # en pan-controls altijd zichtbaar zijn.
@@ -1151,17 +1408,27 @@ with tab_map:
                     color="session",
                     category_orders={"session": session_order},
                     color_discrete_map=SESSION_COLOURS,
+                    template="plotly_dark",
                     labels={"speed_kmh": "Snelheid (km/h)",
                             "minute_from_start": "Minuten sinds start"},
                 )
             else:
                 speed_fig = px.line(
                     gps, x="timestamp", y="speed_kmh",
+                    template="plotly_dark",
                     labels={"speed_kmh": "Snelheid (km/h)", "timestamp": "Tijd"},
                 )
                 speed_fig.update_traces(line=dict(color="#3b82f6", width=2))
-            speed_fig.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=10),
-                                    legend_title_text="")
+            speed_fig.update_layout(
+                height=260,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="#1e293b",
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                            bordercolor="#334155", borderwidth=1),
+                xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+                yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+            )
             st.plotly_chart(speed_fig, use_container_width=True)
             st.caption(
                 "Snelheden zijn afgeleid van haversine-afstand tussen opeenvolgende "
@@ -1220,27 +1487,34 @@ with tab_zones:
 
         # --- Boxplot van temperatuur -------------------------------------
         st.markdown("**Temperatuurverdeling per zone**")
+        _box_base = dict(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+            yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
+        )
         if is_compare:
             fig_box = px.box(
                 z, x="zone", y="tempC", color="session",
                 category_orders={"zone": zone_order, "session": session_order},
                 color_discrete_map=SESSION_COLOURS,
                 points="all",
+                template="plotly_dark",
                 labels={"tempC": "Temperatuur (°C)", "zone": "", "session": ""},
             )
-            fig_box.update_layout(boxmode="group", height=420,
-                                  margin=dict(l=10, r=10, t=10, b=10),
-                                  legend_title_text="")
+            fig_box.update_layout(**_box_base, boxmode="group", height=420)
         else:
             fig_box = px.box(
                 z, x="zone", y="tempC", color="zone",
                 category_orders={"zone": zone_order},
                 color_discrete_map=ZONE_COLOURS,
                 points="all",
+                template="plotly_dark",
                 labels={"tempC": "Temperatuur (°C)", "zone": ""},
             )
-            fig_box.update_layout(showlegend=False, height=400,
-                                  margin=dict(l=10, r=10, t=10, b=10))
+            fig_box.update_layout(**_box_base, showlegend=False, height=400)
         st.plotly_chart(fig_box, use_container_width=True)
 
         if is_compare:
@@ -1353,6 +1627,7 @@ with tab_zones:
                 category_orders={"zone": zone_order, "session": session_order},
                 color_discrete_map=SESSION_COLOURS,
                 log_x=True, opacity=0.7,
+                template="plotly_dark",
                 labels={"light_lux": "Licht (lux, log)", "tempC": "Temperatuur (°C)"},
             )
         else:
@@ -1362,15 +1637,27 @@ with tab_zones:
                 category_orders={"zone": zone_order},
                 color_discrete_map=ZONE_COLOURS,
                 log_x=True, opacity=0.7,
+                template="plotly_dark",
                 labels={"light_lux": "Licht (lux, log)", "tempC": "Temperatuur (°C)"},
             )
         fig_sc.update_traces(marker=dict(size=8))
-        fig_sc.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
-                             legend_title_text="")
+        fig_sc.update_layout(
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=30, b=10),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
+        )
         st.plotly_chart(fig_sc, use_container_width=True)
 
         # --- Tijd-van-dag confounder check -------------------------------
         st.markdown("**Wanneer is elke zone bezocht?** *(tijd-van-dag controle)*")
+        _tl_base = dict(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            showlegend=False,
+            xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+            yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+        )
         if is_compare:
             timeline = (z.assign(minute=z["minute_from_start"].round())
                          .groupby(["minute", "zone", "session"])
@@ -1381,10 +1668,10 @@ with tab_zones:
                 facet_row="session",
                 category_orders={"zone": zone_order, "session": session_order},
                 color_discrete_map=ZONE_COLOURS,
+                template="plotly_dark",
                 labels={"minute": "Minuten sinds start", "zone": ""},
             )
-            fig_tl.update_layout(showlegend=False, height=320,
-                                 margin=dict(l=10, r=10, t=30, b=10))
+            fig_tl.update_layout(**_tl_base, height=320, margin=dict(l=10, r=10, t=30, b=10))
         else:
             timeline = (z.assign(minute=z["timestamp"].dt.floor("1min"))
                          .groupby(["minute", "zone"]).size().reset_index(name="metingen"))
@@ -1392,10 +1679,10 @@ with tab_zones:
                 timeline, x="minute", y="zone", size="metingen", color="zone",
                 category_orders={"zone": zone_order},
                 color_discrete_map=ZONE_COLOURS,
+                template="plotly_dark",
                 labels={"minute": "Tijd", "zone": ""},
             )
-            fig_tl.update_layout(showlegend=False, height=220,
-                                 margin=dict(l=10, r=10, t=10, b=10))
+            fig_tl.update_layout(**_tl_base, height=220, margin=dict(l=10, r=10, t=10, b=10))
         st.plotly_chart(fig_tl, use_container_width=True)
         st.caption(
             "Als zones in volgorde bezocht zijn (niet door elkaar), kan een deel van het "
@@ -1416,6 +1703,11 @@ with tab_corr:
         "mq_raw": "MQ gas",
     }
 
+    _hm_base = dict(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+        font=dict(color="#cbd5e1"),
+        coloraxis_colorbar=dict(tickfont=dict(color="#94a3b8")),
+    )
     if is_compare:
         st.markdown("**Correlatiematrix per sessie**")
         cols_st = st.columns(len(session_order))
@@ -1428,9 +1720,10 @@ with tab_corr:
                 corr, text_auto=".2f",
                 color_continuous_scale="RdBu_r",
                 zmin=-1, zmax=1, aspect="auto",
+                template="plotly_dark",
                 title=s,
             )
-            fig.update_layout(height=380, margin=dict(l=10, r=10, t=40, b=10))
+            fig.update_layout(**_hm_base, height=380, margin=dict(l=10, r=10, t=40, b=10))
             col_st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Als een correlatie sterk verschilt tussen sessies, is dat een aanwijzing dat "
@@ -1445,8 +1738,9 @@ with tab_corr:
             corr, text_auto=".2f",
             color_continuous_scale="RdBu_r",
             zmin=-1, zmax=1, aspect="auto",
+            template="plotly_dark",
         )
-        fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10))
+        fig.update_layout(**_hm_base, height=400, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("**Paar-scatter**")
@@ -1464,6 +1758,7 @@ with tab_corr:
             color_discrete_map=SESSION_COLOURS,
             trendline="ols",
             opacity=0.6, height=420,
+            template="plotly_dark",
             labels={x_axis: sensor_labels_nl[x_axis], y_axis: sensor_labels_nl[y_axis]},
         )
     else:
@@ -1471,9 +1766,17 @@ with tab_corr:
             df, x=x_axis, y=y_axis,
             trendline="ols",
             opacity=0.6, height=420,
+            template="plotly_dark",
             labels={x_axis: sensor_labels_nl[x_axis], y_axis: sensor_labels_nl[y_axis]},
         )
-    fig2.update_layout(margin=dict(l=10, r=10, t=10, b=10), legend_title_text="")
+    fig2.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+        margin=dict(l=10, r=10, t=10, b=10),
+        legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                    bordercolor="#334155", borderwidth=1),
+        xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+        yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+    )
     st.plotly_chart(fig2, use_container_width=True)
 
 
