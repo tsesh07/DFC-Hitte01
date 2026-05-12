@@ -9,6 +9,7 @@ Starten met:  streamlit run app.py
 """
 
 import json
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import geopandas as gpd
@@ -275,19 +276,53 @@ MAP_STYLES = {
 # --------------------------------------------------------------------------
 # Geo-hulpfuncties
 # --------------------------------------------------------------------------
-@st.cache_data(ttl=86_400 * 7)
+def load_or_fetch_zone_boundaries() -> dict[str, dict]:
+    """Geef zone-coördinaten terug vanuit het snapshot-bestand als dat bestaat,
+    anders haal ze op via de Amsterdam API en OSM en sla ze op in het bestand.
+
+    Formaat van het snapshot-bestand:
+    {
+      "<zone>": {"coords": [[lat, lon], ...], "source": "<Amsterdam API|OSM>"}
+    }
+
+    Zones die niet in het bestand staan worden later in build_zones_gdf()
+    afgehandeld via de cirkelbuffer-fallback.
+    """
+    if ZONE_BOUNDARIES_PATH.exists():
+        with open(ZONE_BOUNDARIES_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    ams = fetch_amsterdam_boundaries()
+    osm = fetch_osm_boundaries()
+
+    snapshot: dict[str, dict] = {}
+    for zone in ZONES:
+        if zone in ams:
+            snapshot[zone] = {"coords": ams[zone], "source": "Amsterdam API"}
+        elif zone in osm:
+            snapshot[zone] = {"coords": osm[zone], "source": "OSM"}
+
+    ZONE_BOUNDARIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(ZONE_BOUNDARIES_PATH, "w", encoding="utf-8") as fh:
+        json.dump(snapshot, fh)
+
+    return snapshot
+
+
 def build_zones_gdf() -> gpd.GeoDataFrame:
     """Bouw een GeoDataFrame van zone-polygonen in RD New (EPSG:28992).
 
     Prioriteit per zone:
-      1. Gemeente Amsterdam DataPlatform (officiële bestuurlijke grenzen)
-      2. OpenStreetMap Overpass (fysieke terreincontouren)
-      3. Cirkelbuffer om het gedefinieerde middelpunt (altijd beschikbaar)
+      1. Snapshot-bestand data/zone_boundaries.json (lokaal, instant)
+      2. Gemeente Amsterdam DataPlatform (eerste run / na refresh)
+      3. OpenStreetMap Overpass (eerste run / na refresh)
+      4. Cirkelbuffer om het gedefinieerde middelpunt (altijd beschikbaar)
 
     Resultaat in RD New zodat assign_zones_via_sjoin correct in meters rekent.
     """
-    ams = fetch_amsterdam_boundaries()  # Amsterdam DataPlatform
-    osm = fetch_osm_boundaries()        # OSM Overpass
+    snapshot = load_or_fetch_zone_boundaries()
+    ams = {z: v["coords"] for z, v in snapshot.items() if v.get("source") == "Amsterdam API"}
+    osm = {z: v["coords"] for z, v in snapshot.items() if v.get("source") == "OSM"}
 
     geoms_rd:   list = []
     zone_names: list = []
@@ -557,6 +592,10 @@ def fetch_osm_boundaries() -> dict[str, list[tuple[float, float]]]:
 # Gemeente Amsterdam DataPlatform — officiële buurt-/gebiedsgrenzen
 # --------------------------------------------------------------------------
 AMS_API_BASE = "https://api.data.amsterdam.nl/v1"
+
+# Snapshot-bestand: coördinaten worden hier opgeslagen na de eerste fetch
+# zodat de app nooit meer externe API's hoeft te raadplegen.
+ZONE_BOUNDARIES_PATH = Path(__file__).parent / "data" / "zone_boundaries.json"
 
 
 @st.cache_data(ttl=86_400 * 7, show_spinner=False)
@@ -899,6 +938,11 @@ with st.sidebar.expander("📍 Zonegrenzen — databron", expanded=False):
     for _, zrow in zones_gdf.iterrows():
         icon = _source_icons.get(zrow["_source"], "•")
         st.caption(f"{icon} **{zrow['zone']}**: {zrow['_source']}")
+    _snapshot_exists = ZONE_BOUNDARIES_PATH.exists()
+    st.caption(f"📁 Snapshot: {'aanwezig' if _snapshot_exists else 'niet aanwezig'}")
+    if st.button("🔄 Grenzen vernieuwen", help="Verwijdert de lokale snapshot en herlaadt grenzen van Amsterdam API / OSM"):
+        ZONE_BOUNDARIES_PATH.unlink(missing_ok=True)
+        st.rerun()
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
 # Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
