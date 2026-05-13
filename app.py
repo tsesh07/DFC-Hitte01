@@ -21,6 +21,7 @@ import streamlit as st
 
 # Statistische toetsen
 from scipy import stats as scipy_stats
+from scipy.spatial.distance import cdist
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
 # Voor KNMI-API requests en OSM Overpass
@@ -447,6 +448,108 @@ def add_drift_correction(df: pd.DataFrame) -> pd.DataFrame:
             grp["tempC"] - slope * (grp["minute_from_start"] - mean_x)
         )
     return df
+
+
+@st.cache_data(show_spinner=False)
+def compute_morans(
+    lat_arr: np.ndarray,
+    lon_arr: np.ndarray,
+    values_arr: np.ndarray,
+    threshold_m: int = 200,
+    max_pts: int = 800,
+    n_perms: int = 499,
+) -> dict:
+    """Global Moran's I + Local LISA statistics for a set of GPS-tagged values.
+
+    Uses a distance-band spatial weights matrix (row-standardised): W_ij = 1
+    if the great-circle distance between points i and j is ≤ threshold_m,
+    W_ij = 0 otherwise.  Points with no neighbours within the threshold are
+    excluded (isolated points don't contribute meaningful autocorrelation).
+
+    The global p-value is estimated via a permutation test (n_perms shuffles).
+
+    Local cluster types (LISA):
+      HH – High-High  : hot spot  (high value surrounded by high values)
+      LL – Low-Low    : cold spot  (low  value surrounded by low  values)
+      HL – High-Low   : warm outlier in a cool neighbourhood
+      LH – Low-High   : cool outlier in a warm neighbourhood
+    """
+    # --- subsample to keep the n×n distance matrix tractable ----------------
+    n_full = len(lat_arr)
+    if n_full > max_pts:
+        idx = np.round(np.linspace(0, n_full - 1, max_pts)).astype(int)
+        lat_arr    = lat_arr[idx]
+        lon_arr    = lon_arr[idx]
+        values_arr = values_arr[idx]
+
+    # Convert to approximate metres via RD New projection
+    pts_wgs = np.column_stack([lon_arr, lat_arr])
+    gdf_pts = gpd.GeoDataFrame(
+        geometry=gpd.points_from_xy(lon_arr, lat_arr), crs=WGS84
+    ).to_crs(RD_NEW)
+    xy_m = np.column_stack([gdf_pts.geometry.x, gdf_pts.geometry.y])
+
+    # --- distance-band weight matrix (dense, feasible for ≤ 800 pts) --------
+    D = cdist(xy_m, xy_m)
+    W = (D < threshold_m).astype(float)
+    np.fill_diagonal(W, 0)
+
+    # Drop isolated points (no neighbours)
+    has_neighbours = W.sum(axis=1) > 0
+    W          = W[has_neighbours][:, has_neighbours]
+    lat_use    = lat_arr[has_neighbours]
+    lon_use    = lon_arr[has_neighbours]
+    vals_use   = values_arr[has_neighbours]
+
+    n = len(vals_use)
+    if n < 5:
+        return {"error": "Te weinig buren gevonden — vergroot threshold of voeg meer data toe."}
+
+    # Row-standardise
+    row_sums = W.sum(axis=1, keepdims=True)
+    W = W / row_sums
+
+    z   = vals_use - vals_use.mean()
+    s2  = (z ** 2).mean()
+    S0  = W.sum()
+    Wz  = W @ z
+
+    # Global Moran's I
+    I = float((n / S0) * (z @ Wz) / (z @ z))
+
+    # Permutation p-value
+    rng = np.random.default_rng(42)
+    perm_I = np.array([
+        float((n / S0) * ((rng.permutation(z)) @ (W @ rng.permutation(z))) / (z @ z))
+        for _ in range(n_perms)
+    ])
+    p_value = float((np.abs(perm_I) >= abs(I)).sum() + 1) / (n_perms + 1)
+
+    # Local Moran's I (LISA)
+    local_I = (z * Wz) / s2
+
+    cluster = []
+    for zi, li in zip(z, local_I):
+        if   li > 0 and zi > 0: cluster.append("HH")
+        elif li > 0 and zi < 0: cluster.append("LL")
+        elif li < 0 and zi > 0: cluster.append("HL")
+        elif li < 0 and zi < 0: cluster.append("LH")
+        else:                    cluster.append("NS")
+
+    return {
+        "I":            I,
+        "p_value":      p_value,
+        "n_used":       n,
+        "n_full":       n_full,
+        "threshold_m":  threshold_m,
+        "local_I":      local_I,
+        "cluster":      np.array(cluster),
+        "z":            z,
+        "spatial_lag":  Wz,
+        "lat":          lat_use,
+        "lon":          lon_use,
+        "vals":         vals_use,
+    }
 
 
 def clean_sensor_data(df: pd.DataFrame, drop_glitches: bool) -> pd.DataFrame:
@@ -1330,8 +1433,8 @@ st.divider()
 # --------------------------------------------------------------------------
 # Tabs
 # --------------------------------------------------------------------------
-tab_time, tab_map, tab_zones, tab_corr, tab_data = st.tabs(
-    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🔗 Correlaties", "📋 Ruwe data"]
+tab_time, tab_map, tab_zones, tab_corr, tab_spatial, tab_data = st.tabs(
+    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🔗 Correlaties", "🔬 Ruimtelijke autocorr.", "📋 Ruwe data"]
 )
 
 # ---- Tijdreeks ----------------------------------------------------------
@@ -1431,11 +1534,12 @@ with tab_map:
             m4.metric("Wandeltijd",       f"{track_min:.1f} min")
 
         # --- Weergave-opties ---------------------------------------------
-        c1, c2 = st.columns([2, 1])
+        c1, c2, c3 = st.columns([2, 1, 1])
         if is_compare:
             colour_label = "Sessie"
             colour_col   = "session"
             c1.info("In vergelijkmodus is de kleur ingesteld op **sessie**.")
+            show_heatmap = False
         else:
             colour_options = {
                 "Tijdsverloop":                          "_time_idx",
@@ -1451,6 +1555,15 @@ with tab_map:
             colour_label = c1.selectbox("Route inkleuren op",
                                         list(colour_options.keys()), index=1)
             colour_col = colour_options[colour_label]
+            show_heatmap = c3.checkbox(
+                "🌡️ Heatmap",
+                value=False,
+                help=(
+                    "Ruimtelijke interpolatie van drift-gecorrigeerde temperatuur. "
+                    "Schat de temperatuurverdeling op onbemeten plekken op basis "
+                    "van nabijgelegen metingen (KDE, gewogen naar °C)."
+                ),
+            )
 
         map_style_label = c2.selectbox("Kaartstijl",
                                        list(MAP_STYLES.keys()), index=0)
@@ -1460,6 +1573,33 @@ with tab_map:
 
         # --- Bouw de kaart op (MapLibre-gebaseerde Scattermap) -----------
         fig = go.Figure()
+
+        # Heatmap-laag (onderste laag, toegevoegd vóór route en zones)
+        if show_heatmap:
+            hm = gps.dropna(subset=["lat_dec", "lon_dec", "tempC_detrended"])
+            if len(hm) >= 4:
+                _zlo = float(hm["tempC_detrended"].quantile(0.05))
+                _zhi = float(hm["tempC_detrended"].quantile(0.95))
+                fig.add_trace(go.Densitymap(
+                    lat=hm["lat_dec"],
+                    lon=hm["lon_dec"],
+                    z=hm["tempC_detrended"],
+                    radius=30,
+                    colorscale="Inferno",
+                    zmin=_zlo,
+                    zmax=_zhi,
+                    showscale=True,
+                    colorbar=dict(
+                        title=dict(text="°C", side="right"),
+                        thickness=14,
+                        x=1.0,
+                        len=0.6,
+                    ),
+                    opacity=0.6,
+                    name="Temp. heatmap",
+                    hoverinfo="skip",
+                    showlegend=True,
+                ))
 
         if is_compare:
             for s in session_order:
@@ -2045,6 +2185,185 @@ with tab_corr:
 
 
 # ---- Ruwe data -----------------------------------------------------------
+# ---- Ruimtelijke autocorrelatie -----------------------------------------
+with tab_spatial:
+    st.subheader("Ruimtelijke autocorrelatie — Moran's I")
+
+    sa_col1, sa_col2 = st.columns([1, 1])
+    threshold_m = sa_col1.slider(
+        "Afstandsdrempel (m)", min_value=50, max_value=500, value=200, step=25,
+        help="Twee punten gelden als buren als hun onderlinge afstand ≤ deze waarde is.",
+    )
+    sa_session = sa_col2.selectbox(
+        "Sessie", options=session_order, index=0,
+        help="Moran's I wordt per sessie berekend (gecombineerde data vermengt twee routes).",
+    )
+
+    sa_df = df[(df["session"] == sa_session)].dropna(
+        subset=["lat_dec", "lon_dec", "tempC_detrended"]
+    )
+
+    if len(sa_df) < 10:
+        st.info("Te weinig geldige GPS+temperatuurmetingen voor deze sessie.")
+    else:
+        moran = compute_morans(
+            sa_df["lat_dec"].values,
+            sa_df["lon_dec"].values,
+            sa_df["tempC_detrended"].values,
+            threshold_m=threshold_m,
+        )
+
+        if "error" in moran:
+            st.warning(moran["error"])
+        else:
+            # ── Global Moran's I ────────────────────────────────────────────
+            st.markdown("#### Globale Moran's I")
+            gi1, gi2, gi3, gi4 = st.columns(4)
+            gi1.metric("Moran's I", f"{moran['I']:.4f}")
+            gi2.metric("p-waarde (permutatie)", f"{moran['p_value']:.4f}")
+            gi3.metric("Punten gebruikt", f"{moran['n_used']} / {moran['n_full']}")
+            gi4.metric("Drempel", f"{moran['threshold_m']} m")
+
+            # Interpretation card
+            I_val  = moran["I"]
+            p_val  = moran["p_value"]
+            sig    = p_val < 0.05
+            if sig and I_val > 0.3:
+                _interp = ("Sterke <strong>positieve</strong> ruimtelijke autocorrelatie: nabijgelegen "
+                           "metingen hebben sterk vergelijkbare temperaturen. "
+                           "Dit valideert de zone-indeling statisch.")
+                _variant = "blue"
+            elif sig and I_val > 0:
+                _interp = ("Zwakke maar significante positieve ruimtelijke autocorrelatie: "
+                           "nabijgelegen punten zijn iets warmer/koeler dan gemiddeld samen.")
+                _variant = "blue"
+            elif sig and I_val < 0:
+                _interp = ("Negatieve ruimtelijke autocorrelatie: temperaturen wisselen sterk "
+                           "af tussen nabijgelegen punten — ongewoon patroon.")
+                _variant = "amber"
+            else:
+                _interp = ("Geen significante ruimtelijke autocorrelatie gevonden (p ≥ 0.05). "
+                           "Temperatuurpatroon is niet aantoonbaar geclusterd op deze schaal.")
+                _variant = "amber"
+
+            st.markdown(
+                f'<div class="insight-card insight-card--{_variant}">'
+                f'<p class="card-body">{_interp}</p></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── Moran Scatter Plot ──────────────────────────────────────────
+            st.markdown("#### Moran-spreidingsdiagram")
+            st.caption(
+                "Elk punt = één GPS-meting. X-as: gestandaardiseerde temperatuur (z). "
+                "Y-as: gewogen gemiddelde van buren (ruimtelijke lag). "
+                "Punten rechtsboven (HH) en linksonder (LL) bevestigen ruimtelijke clustering."
+            )
+
+            scatter_df = pd.DataFrame({
+                "z":           moran["z"],
+                "spatial_lag": moran["spatial_lag"],
+                "cluster":     moran["cluster"],
+            })
+
+            LISA_COLOURS = {
+                "HH": "#ef4444",   # rood — warmte-hotspot
+                "LL": "#3b82f6",   # blauw — koude-coldspot
+                "HL": "#f97316",   # oranje — warme uitbijter in koele omgeving
+                "LH": "#a78bfa",   # paars — koele uitbijter in warme omgeving
+                "NS": "#475569",   # grijs — niet significant
+            }
+            LISA_LABELS = {
+                "HH": "HH – Warmte-hotspot",
+                "LL": "LL – Koude-coldspot",
+                "HL": "HL – Warm in koele omgeving",
+                "LH": "LH – Koel in warme omgeving",
+                "NS": "NS – Niet significant",
+            }
+
+            scatter_fig = go.Figure()
+            for ctype, colour in LISA_COLOURS.items():
+                sub = scatter_df[scatter_df["cluster"] == ctype]
+                if sub.empty:
+                    continue
+                scatter_fig.add_trace(go.Scatter(
+                    x=sub["z"], y=sub["spatial_lag"],
+                    mode="markers",
+                    marker=dict(color=colour, size=5, opacity=0.7),
+                    name=LISA_LABELS[ctype],
+                ))
+            # Regression line (slope = Moran's I)
+            z_range = np.linspace(scatter_df["z"].min(), scatter_df["z"].max(), 100)
+            scatter_fig.add_trace(go.Scatter(
+                x=z_range, y=moran["I"] * z_range,
+                mode="lines",
+                line=dict(color="#38bdf8", width=2, dash="dash"),
+                name=f"Helling = I = {moran['I']:.3f}",
+            ))
+            scatter_fig.add_hline(y=0, line=dict(color="#475569", width=1))
+            scatter_fig.add_vline(x=0, line=dict(color="#475569", width=1))
+            scatter_fig.update_layout(
+                template="plotly_dark",
+                xaxis_title="Gestandaardiseerde temperatuur (z)",
+                yaxis_title="Ruimtelijke lag (Wz)",
+                height=420,
+                legend=dict(bgcolor="rgba(15,23,42,0.85)", bordercolor="#334155",
+                            borderwidth=1, font=dict(color="#cbd5e1")),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(30,41,59,0.6)",
+            )
+            st.plotly_chart(scatter_fig, use_container_width=True)
+
+            # ── LISA Hotspot Map ────────────────────────────────────────────
+            st.markdown("#### LISA-kaart — lokale hotspots & coldspots")
+            st.caption(
+                "Rood = warmte-hotspot (HH), blauw = koude-coldspot (LL), "
+                "oranje/paars = ruimtelijke uitbijters, grijs = niet significant."
+            )
+
+            map_style_sa = st.selectbox(
+                "Kaartstijl", list(MAP_STYLES.keys()), index=0, key="sa_map_style"
+            )
+
+            lisa_fig = go.Figure()
+            for ctype, colour in LISA_COLOURS.items():
+                mask = moran["cluster"] == ctype
+                if not mask.any():
+                    continue
+                lisa_fig.add_trace(go.Scattermap(
+                    lat=moran["lat"][mask],
+                    lon=moran["lon"][mask],
+                    mode="markers",
+                    marker=dict(size=10, color=colour, opacity=0.85),
+                    name=LISA_LABELS[ctype],
+                    hovertext=[
+                        f"{LISA_LABELS[ctype]}<br>Temp: {v:.2f} °C"
+                        for v in moran["vals"][mask]
+                    ],
+                    hoverinfo="text",
+                ))
+
+            lisa_fig.update_layout(
+                map=dict(
+                    style=MAP_STYLES[map_style_sa],
+                    center=dict(lat=float(moran["lat"].mean()),
+                                lon=float(moran["lon"].mean())),
+                    zoom=14,
+                ),
+                height=560,
+                margin=dict(l=0, r=0, t=0, b=0),
+                showlegend=True,
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(bgcolor="rgba(15,23,42,0.85)", bordercolor="#334155",
+                            borderwidth=1, font=dict(color="#cbd5e1")),
+            )
+            st.plotly_chart(
+                lisa_fig, use_container_width=True,
+                config={"scrollZoom": True, "displayModeBar": True,
+                        "modeBarButtonsToRemove": ["lasso2d", "select2d"]},
+            )
+
+
 with tab_data:
     st.subheader("Gefilterde records")
     st.dataframe(df, use_container_width=True, height=500)
