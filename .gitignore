@@ -1,0 +1,11 @@
+# Raster outputs (regenereer met make_raster.py)
+output/*.tif
+output/*.prj
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
