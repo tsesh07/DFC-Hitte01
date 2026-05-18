@@ -16,7 +16,12 @@ RAW_PATH = APP_DIR / "data" / "raw" / "DATA.CSV"
 SESSIONS = {
     "2026-05-06": "Dag 1 - deksel dicht",
     "2026-05-08": "Dag 2 - deksel open",
+    "2026-05-18": "Dag 3 - GPS track",
 }
+
+# Sessies waarvoor alleen de GPS-route beschikbaar is (sensormeting defect).
+# Worden getoond op de kaart maar uitgesloten van alle sensor-analyses.
+GPS_ONLY_SESSIONS = frozenset({"Dag 3 - GPS track"})
 
 # Methodologische context per sessie — leeft hier zodat het dashboard en
 # eventuele analyse-scripts dezelfde bron raadplegen. Vul bij elke nieuwe
@@ -41,6 +46,17 @@ SESSION_METADATA = {
         "rol_in_analyse":  "Route-omkering dient als controle voor sensor-drift; "
                            "data-kwaliteit lager dus secundair",
     },
+    "Dag 3 - GPS track": {
+        "datum":           "2026-05-18",
+        "wandel_richting": "Onbekend — route niet volledig gedocumenteerd",
+        "deksel":          "—",
+        "hardware_status": "BMP280 I2C-bus uitval na ~22 min (losse kabel losgetrokken "
+                           "door teamlid); Xtorm 35 Wh powerbank + nieuwe USB-C kabel",
+        "bekende_issues":  "Sensormeting onbruikbaar na 15:32 UTC+2 (bevroren register, "
+                           "herhalende waarden 189.10 °C / 1774.47 hPa); alleen GPS intact",
+        "rol_in_analyse":  "GPS-only — uitgesloten van sensor-analyse; "
+                           "route zichtbaar op kaart als stippellijn",
+    },
 }
 
 # Wandel-vensters (gps_time als HHMMSS UTC) — knipt opwarming/idle weg.
@@ -52,6 +68,7 @@ SESSION_METADATA = {
 WALK_WINDOWS = {
     "Dag 1 - deksel dicht": (121155, 130545),
     "Dag 2 - deksel open":  (110000, 122635),
+    "Dag 3 - GPS track":    (130750, 141602),
 }
 
 

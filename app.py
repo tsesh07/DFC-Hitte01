@@ -30,7 +30,7 @@ import urllib.parse
 import urllib.error
 import io
 
-from data_loader import load_data, SESSION_METADATA
+from data_loader import load_data, SESSION_METADATA, GPS_ONLY_SESSIONS
 
 # --------------------------------------------------------------------------
 # Pagina-configuratie
@@ -227,6 +227,7 @@ ZONE_COLOURS = {
 SESSION_COLOURS = {
     "Dag 1 - deksel dicht": "#2563eb",
     "Dag 2 - deksel open":  "#f97316",
+    "Dag 3 - GPS track":    "#10b981",
 }
 
 # --------------------------------------------------------------------------
@@ -990,7 +991,8 @@ for s in available_sessions:
 st.sidebar.markdown("---")
 st.sidebar.caption(
     "**Dag 1**: schone data-acquisitie.  \n"
-    "**Dag 2**: intermittente USB-stroomstoringen — voorzichtig interpreteren."
+    "**Dag 2**: intermittente USB-stroomstoringen — voorzichtig interpreteren.  \n"
+    "**Dag 3**: alleen GPS-track (BMP280 I2C-uitval)."
 )
 
 # --------------------------------------------------------------------------
@@ -1035,6 +1037,10 @@ df = add_drift_correction(df)
 zones_gdf = build_zones_gdf()
 df["zone"] = assign_zones_via_sjoin(df, zones_gdf)
 
+# GPS-track sessies bevatten geen betrouwbare sensordata — apart houden zodat
+# alle sensor-analyses uitsluitend op Dag 1 / Dag 2 draaien.
+df_sensor = df[~df["session"].isin(GPS_ONLY_SESSIONS)].copy()
+
 # Toon databron per zone in de zijbalk (Amsterdam API / OSM / cirkel)
 _source_icons = {"Amsterdam API": "🏛️", "OSM": "🗺️", "cirkel (fallback)": "⭕"}
 with st.sidebar.expander("📍 Zonegrenzen — databron", expanded=False):
@@ -1049,16 +1055,18 @@ with st.sidebar.expander("📍 Zonegrenzen — databron", expanded=False):
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
 # Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
-_hard_mean  = df[df["zone"].isin(["Museumplein", "Frans Halsbuurt"])]["tempC_detrended"].mean()
-_green_mean = df[df["zone"] == "Sarphatipark"]["tempC_detrended"].mean()
+_hard_mean  = df_sensor[df_sensor["zone"].isin(["Museumplein", "Frans Halsbuurt"])]["tempC_detrended"].mean()
+_green_mean = df_sensor[df_sensor["zone"] == "Sarphatipark"]["tempC_detrended"].mean()
 uhi_index = (
     round(float(_hard_mean - _green_mean), 2)
     if (not np.isnan(_hard_mean) and not np.isnan(_green_mean))
     else None
 )
 
-is_compare = len(sessions) > 1
 session_order = [s for s in available_sessions if s in sessions]
+# Sensor-only subset: GPS-track sessies hebben geen bruikbare sensordata
+sensor_session_order = [s for s in session_order if s not in GPS_ONLY_SESSIONS]
+is_compare = len(sensor_session_order) > 1
 
 # --------------------------------------------------------------------------
 # KNMI-weerdata ophalen voor elke geselecteerde sessie
@@ -1069,8 +1077,8 @@ session_order = [s for s in available_sessions if s in sessions]
 knmi_per_session: dict[str, dict] = {}
 knmi_errors: dict[str, str] = {}
 
-for s in session_order:
-    sub = df[df["session"] == s]
+for s in sensor_session_order:
+    sub = df_sensor[df_sensor["session"] == s]
     if sub.empty:
         continue
 
@@ -1119,11 +1127,11 @@ if knmi_errors:
 if is_compare:
     _meta_line = (
         f"Vergelijking van <strong>{len(sessions)} sessies</strong> "
-        f"({', '.join(sessions)}) &mdash; {len(df):,} metingen totaal."
+        f"({', '.join(sessions)}) &mdash; {len(df_sensor):,} sensor-metingen totaal."
     )
 else:
     _only = sessions[0]
-    _sub  = df[df["session"] == _only]
+    _sub  = df_sensor[df_sensor["session"] == _only] if _only not in GPS_ONLY_SESSIONS else df[df["session"] == _only]
     _meta_line = (
         f"<strong>{_only}</strong> &mdash; {len(_sub):,} metingen van "
         f"{_sub['timestamp'].min():%Y-%m-%d %H:%M} tot {_sub['timestamp'].max():%H:%M}."
@@ -1159,8 +1167,8 @@ st.markdown("## 🔍 Hoofdbevindingen")
 def _safe_mean(series): return series.dropna().mean() if len(series.dropna()) else np.nan
 
 stats_per_session = {}
-for s in session_order:
-    sub = df[df["session"] == s].dropna(subset=["tempC"])
+for s in sensor_session_order:
+    sub = df_sensor[df_sensor["session"] == s].dropna(subset=["tempC"])
     if sub.empty:
         continue
     first10 = sub[sub["minute_from_start"] <= 10]["tempC"].mean()
@@ -1178,8 +1186,8 @@ col1, col2, col3 = st.columns(3)
 
 # Kaart 1: aantal metingen + dataset-overzicht
 with col1:
-    total_n = len(df)
-    n_zones = df[df["zone"] != "Onderweg"]["zone"].nunique()
+    total_n = len(df_sensor)
+    n_zones = df_sensor[df_sensor["zone"] != "Onderweg"]["zone"].nunique()
     st.markdown(
         f"""<div class="insight-card insight-card--blue">
           <p class="card-title">📊 Dataset</p>
@@ -1214,8 +1222,8 @@ with col2:
 # Kaart 3: belangrijkste bevinding van de route-omkering (Museumplein test)
 with col3:
     mp_per_session = {}
-    for s in session_order:
-        mp_sub = df[(df["session"] == s) & (df["zone"] == "Museumplein")]["tempC"].dropna()
+    for s in sensor_session_order:
+        mp_sub = df_sensor[(df_sensor["session"] == s) & (df_sensor["zone"] == "Museumplein")]["tempC"].dropna()
         if len(mp_sub):
             mp_per_session[s] = mp_sub.mean()
     if len(mp_per_session) == 2:
@@ -1274,8 +1282,8 @@ st.markdown("### 📋 Samenvatting per sessie")
 
 if is_compare:
     kpi_rows = {}
-    for s in session_order:
-        sub = df[df["session"] == s]
+    for s in sensor_session_order:
+        sub = df_sensor[df_sensor["session"] == s]
         sub_t = sub.dropna(subset=["tempC"])
         duration = (sub["timestamp"].max() - sub["timestamp"].min()).total_seconds() / 60
         gps_valid = sub.dropna(subset=["lat_dec"])
@@ -1301,11 +1309,11 @@ if is_compare:
         }
     st.dataframe(pd.DataFrame(kpi_rows), use_container_width=True)
 else:
-    sub = df
+    sub = df_sensor if sensor_session_order else df
     sub_t = sub.dropna(subset=["tempC"])
-    duration = (sub["timestamp"].max() - sub["timestamp"].min()).total_seconds() / 60
+    duration = (sub["timestamp"].max() - sub["timestamp"].min()).total_seconds() / 60 if not sub.empty else 0
     distance_km = sub["step_m"].sum() / 1000
-    only_session = sessions[0]
+    only_session = sensor_session_order[0] if sensor_session_order else sessions[0]
     knmi = knmi_per_session.get(only_session, {})
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1331,13 +1339,13 @@ st.caption(
     "tijdstippen heen, is dat het ruimtelijke signaal dat we zoeken."
 )
 
-headline_df = df.dropna(subset=["tempC"]).copy()
+headline_df = df_sensor.dropna(subset=["tempC"]).copy()
 fig_headline = px.scatter(
     headline_df,
     x="minute_from_start", y="tempC",
     color="session" if is_compare else "zone",
     category_orders={
-        "session": session_order,
+        "session": sensor_session_order,
         "zone":    [z for z in ZONE_COLOURS if z in headline_df["zone"].unique()],
     },
     color_discrete_map=SESSION_COLOURS if is_compare else ZONE_COLOURS,
@@ -1366,7 +1374,7 @@ fig_headline.update_layout(
 
 # Voeg KNMI omgevingstemperatuur als horizontale referentielijn toe per sessie.
 # Dit maakt de sensor-vs-omgeving offset visueel direct af te lezen.
-for s in session_order:
+for s in sensor_session_order:
     knmi = knmi_per_session.get(s, {})
     if "temp_C" in knmi:
         line_color = SESSION_COLOURS.get(s, "#888888") if is_compare else "#666666"
@@ -1399,8 +1407,8 @@ with st.expander("📝 Methodologische context per sessie", expanded=False):
         "Het experimentele ontwerp van elke wandeling wordt hier expliciet "
         "gedocumenteerd voor reproduceerbaarheid."
     )
-    meta_cols = st.columns(len(session_order))
-    for col_st, s in zip(meta_cols, session_order):
+    meta_cols = st.columns(max(len(sensor_session_order), 1))
+    for col_st, s in zip(meta_cols, sensor_session_order):
         meta = SESSION_METADATA.get(s, {})
         knmi = knmi_per_session.get(s, {})
         with col_st:
@@ -1468,16 +1476,16 @@ with tab_time:
         label, sensor_color = sensor_meta[col]
         if is_compare:
             fig = px.line(
-                df, x="minute_from_start", y=col,
+                df_sensor, x="minute_from_start", y=col,
                 color="session",
-                category_orders={"session": session_order},
+                category_orders={"session": sensor_session_order},
                 color_discrete_map=SESSION_COLOURS,
                 template="plotly_dark",
                 title=label,
                 labels={"minute_from_start": "Minuten sinds start"},
             )
         else:
-            fig = px.line(df, x="timestamp", y=col,
+            fig = px.line(df_sensor, x="timestamp", y=col,
                           template="plotly_dark", title=label)
             fig.update_traces(line=dict(color=sensor_color, width=2))
 
@@ -1501,13 +1509,16 @@ with tab_time:
 with tab_map:
     st.subheader("GPS-route")
 
+    # Map compare = alle geselecteerde sessies, ook GPS-only tracks
+    is_map_compare = len(session_order) > 1
+
     gps = df.dropna(subset=["lat_dec", "lon_dec"]).reset_index(drop=True)
 
     if gps.empty:
         st.info("Geen GPS-fixes beschikbaar in dit venster.")
     else:
         # --- Route-statistieken ------------------------------------------
-        if is_compare:
+        if is_map_compare:
             metrics_rows = {}
             for s in session_order:
                 ssub = gps[gps["session"] == s]
@@ -1535,7 +1546,7 @@ with tab_map:
 
         # --- Weergave-opties ---------------------------------------------
         c1, c2, c3 = st.columns([2, 1, 1])
-        if is_compare:
+        if is_map_compare:
             colour_label = "Sessie"
             colour_col   = "session"
             c1.info("In vergelijkmodus is de kleur ingesteld op **sessie**.")
@@ -1601,17 +1612,20 @@ with tab_map:
                     showlegend=True,
                 ))
 
-        if is_compare:
+        if is_map_compare:
             for s in session_order:
                 ssub = gps[gps["session"] == s]
                 if ssub.empty:
                     continue
                 short_name = s.split(" - ")[0]
+                _gps_only = s in GPS_ONLY_SESSIONS
+                _colour = SESSION_COLOURS.get(s, "#888888")
 
                 fig.add_trace(go.Scattermap(
                     lat=ssub["lat_dec"], lon=ssub["lon_dec"],
                     mode="lines",
-                    line=dict(width=3, color=SESSION_COLOURS[s]),
+                    line=dict(width=2 if _gps_only else 3, color=_colour),
+                    opacity=0.55 if _gps_only else 1.0,
                     name=f"{s} — route",
                     hoverinfo="skip",
                     legendgroup=s,
@@ -1619,9 +1633,12 @@ with tab_map:
                 fig.add_trace(go.Scattermap(
                     lat=ssub["lat_dec"], lon=ssub["lon_dec"],
                     mode="markers",
-                    marker=dict(size=7, color=SESSION_COLOURS[s]),
-                    name=f"{s} — metingen",
+                    marker=dict(size=5 if _gps_only else 7, color=_colour,
+                                opacity=0.55 if _gps_only else 1.0),
+                    name=f"{s} — GPS" if _gps_only else f"{s} — metingen",
                     hovertext=ssub["timestamp"].dt.strftime("%H:%M:%S")
+                              if _gps_only else
+                              ssub["timestamp"].dt.strftime("%H:%M:%S")
                               + " — " + ssub["tempC"].round(1).astype(str) + " °C",
                     hoverinfo="text",
                     legendgroup=s,
@@ -1776,7 +1793,7 @@ with tab_map:
         )
         zoom = 15 if span < 0.01 else 14 if span < 0.03 else 13
 
-        show_legend = is_compare or (not is_compare and colour_col == "zone")
+        show_legend = is_map_compare or (not is_map_compare and colour_col == "zone")
         fig.update_layout(
             map=dict(style=map_style,
                      center=dict(lat=center_lat, lon=center_lon),
@@ -1806,7 +1823,7 @@ with tab_map:
 
         # --- Snelheid-over-tijd grafiek ---------------------------------
         with st.expander("📊 Snelheid over tijd", expanded=False):
-            if is_compare:
+            if is_map_compare:
                 speed_fig = px.line(
                     gps, x="minute_from_start", y="speed_kmh",
                     color="session",
@@ -1863,7 +1880,7 @@ with tab_zones:
                                 help="Sensor heeft ~15s nodig om te stabiliseren tijdens lopen — "
                                      "stilstaande metingen zijn betrouwbaarder")
 
-    z = df.copy()
+    z = df_sensor.copy()
     if exclude_transit:
         z = z[z["zone"] != "Onderweg"]
     if only_stationary:
@@ -1902,7 +1919,7 @@ with tab_zones:
         if is_compare:
             fig_box = px.box(
                 z, x="zone", y="tempC", color="session",
-                category_orders={"zone": zone_order, "session": session_order},
+                category_orders={"zone": zone_order, "session": sensor_session_order},
                 color_discrete_map=SESSION_COLOURS,
                 points="all",
                 template="plotly_dark",
@@ -1940,8 +1957,8 @@ with tab_zones:
         )
 
         if is_compare:
-            anova_cols = st.columns(len(session_order))
-            for col_st, s in zip(anova_cols, session_order):
+            anova_cols = st.columns(len(sensor_session_order))
+            for col_st, s in zip(anova_cols, sensor_session_order):
                 with col_st:
                     st.markdown(f"**{s}**")
                     sub_anova = z[z["session"] == s]
@@ -2028,7 +2045,7 @@ with tab_zones:
                 x="light_lux", y="tempC",
                 color="session",
                 facet_col="zone",
-                category_orders={"zone": zone_order, "session": session_order},
+                category_orders={"zone": zone_order, "session": sensor_session_order},
                 color_discrete_map=SESSION_COLOURS,
                 log_x=True, opacity=0.7,
                 template="plotly_dark",
@@ -2070,7 +2087,7 @@ with tab_zones:
                 timeline, x="minute", y="zone",
                 size="metingen", color="zone",
                 facet_row="session",
-                category_orders={"zone": zone_order, "session": session_order},
+                category_orders={"zone": zone_order, "session": sensor_session_order},
                 color_discrete_map=ZONE_COLOURS,
                 template="plotly_dark",
                 labels={"minute": "Minuten sinds start", "zone": ""},
@@ -2114,9 +2131,9 @@ with tab_corr:
     )
     if is_compare:
         st.markdown("**Correlatiematrix per sessie**")
-        cols_st = st.columns(len(session_order))
-        for col_st, s in zip(cols_st, session_order):
-            sub = df[df["session"] == s]
+        cols_st = st.columns(len(sensor_session_order))
+        for col_st, s in zip(cols_st, sensor_session_order):
+            sub = df_sensor[df_sensor["session"] == s]
             corr = sub[sensor_cols].corr()
             corr.index = corr.index.map(sensor_labels_nl)
             corr.columns = corr.columns.map(sensor_labels_nl)
@@ -2135,7 +2152,7 @@ with tab_corr:
             "licht→temp koppeling)."
         )
     else:
-        corr = df[sensor_cols].corr()
+        corr = df_sensor[sensor_cols].corr()
         corr.index = corr.index.map(sensor_labels_nl)
         corr.columns = corr.columns.map(sensor_labels_nl)
         fig = px.imshow(
@@ -2156,9 +2173,9 @@ with tab_corr:
 
     if is_compare:
         fig2 = px.scatter(
-            df, x=x_axis, y=y_axis,
+            df_sensor, x=x_axis, y=y_axis,
             color="session",
-            category_orders={"session": session_order},
+            category_orders={"session": sensor_session_order},
             color_discrete_map=SESSION_COLOURS,
             trendline="ols",
             opacity=0.6, height=420,
@@ -2167,7 +2184,7 @@ with tab_corr:
         )
     else:
         fig2 = px.scatter(
-            df, x=x_axis, y=y_axis,
+            df_sensor, x=x_axis, y=y_axis,
             trendline="ols",
             opacity=0.6, height=420,
             template="plotly_dark",
@@ -2195,11 +2212,11 @@ with tab_spatial:
         help="Twee punten gelden als buren als hun onderlinge afstand ≤ deze waarde is.",
     )
     sa_session = sa_col2.selectbox(
-        "Sessie", options=session_order, index=0,
+        "Sessie", options=sensor_session_order, index=0,
         help="Moran's I wordt per sessie berekend (gecombineerde data vermengt twee routes).",
     )
 
-    sa_df = df[(df["session"] == sa_session)].dropna(
+    sa_df = df_sensor[(df_sensor["session"] == sa_session)].dropna(
         subset=["lat_dec", "lon_dec", "tempC_detrended"]
     )
 
