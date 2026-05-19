@@ -951,14 +951,14 @@ if uhi_index is not None:
                 display:flex; align-items:center; gap:1.4rem;">
       <span style="font-size:2.6rem; line-height:1;">🏙️</span>
       <div>
-        <div style="color:#94a3b8; font-size:.75rem; font-weight:700;
-                    text-transform:uppercase; letter-spacing:.07em; margin-bottom:.25rem;">
+        <div style="color:#94a3b8; font-size:.85rem; font-weight:700;
+                    text-transform:uppercase; letter-spacing:.07em; margin-bottom:.3rem;">
           Urban Heat Island Index &nbsp;·&nbsp; drift-gecorrigeerd
         </div>
         <div style="color:{_uhi_color}; font-size:2.1rem; font-weight:800; line-height:1.15;">
           {uhi_index:+.2f} °C
         </div>
-        <div style="color:#64748b; font-size:.82rem; margin-top:.2rem;">
+        <div style="color:#94a3b8; font-size:.95rem; margin-top:.35rem; line-height:1.6;">
           {_uhi_context}
         </div>
       </div>
