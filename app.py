@@ -937,9 +937,13 @@ if uhi_index is not None:
     _uhi_color   = "#ef4444" if uhi_index > 0 else "#10b981"
     _uhi_sign    = "warmer" if uhi_index > 0 else "koeler"
     _uhi_context = (
-        f"Verhard (Museumplein + Frans Halsbuurt) is gemiddeld "
+        f"Museumplein + Frans Halsbuurt is gemiddeld "
         f"<strong style='color:{_uhi_color}'>{abs(uhi_index):.2f} °C {_uhi_sign}</strong> "
-        f"dan Sarphatipark (boomkroon) — berekend op drift-gecorrigeerde temperatuur."
+        f"dan Sarphatipark — berekend op drift-gecorrigeerde temperatuur. "
+        f"Op buurtniveau heeft Museumplein het hoogste aandeel verhard (42.6%) "
+        f"maar ook het meeste groen (32.8%); Sarphatipark heeft op buurtniveau "
+        f"minder groen (22.8%). Het verschil is daardoor eerder toe te schrijven "
+        f"aan het hoge asfaltaandeel dan aan afwezigheid van groen."
     )
     st.markdown(f"""
     <div style="background:#1e293b; border:1px solid #334155; border-radius:14px;
