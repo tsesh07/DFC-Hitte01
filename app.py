@@ -22,7 +22,6 @@ import streamlit as st
 # Statistische toetsen
 from scipy import stats as scipy_stats
 
-from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
 # Voor KNMI-API requests en OSM Overpass
 import urllib.request
@@ -580,69 +579,6 @@ def knmi_summary_for_walk(session_df: pd.DataFrame,
     }
 
 
-# --------------------------------------------------------------------------
-# Statistische toetsen
-# --------------------------------------------------------------------------
-def run_zone_anova(subset_df: pd.DataFrame,
-                   value_col: str = "tempC",
-                   group_col: str = "zone") -> dict | None:
-    """One-way ANOVA voor `value_col ~ group_col`, met η² effectgrootte.
-
-    Returnt dict met F, p, eta_squared, n_groups, n_samples, of None
-    als er te weinig groepen/data zijn voor een geldige toets.
-
-    η² (eta-squared) interpretatie (Cohen 1988):
-        0.01 = klein, 0.06 = middel, 0.14 = groot effect.
-    """
-    sub = subset_df.dropna(subset=[value_col, group_col])
-    groups_data = []
-    group_names = []
-    for name, g in sub.groupby(group_col):
-        if len(g) >= 2:
-            groups_data.append(g[value_col].values)
-            group_names.append(name)
-    if len(groups_data) < 2:
-        return None
-
-    f_stat, p_value = scipy_stats.f_oneway(*groups_data)
-
-    all_values = np.concatenate(groups_data)
-    grand_mean = all_values.mean()
-    ss_between = sum(len(g) * (g.mean() - grand_mean) ** 2 for g in groups_data)
-    ss_total = float(((all_values - grand_mean) ** 2).sum())
-    eta_sq = ss_between / ss_total if ss_total > 0 else 0.0
-
-    return {
-        "F": float(f_stat),
-        "p": float(p_value),
-        "eta_squared": float(eta_sq),
-        "n_groups": len(groups_data),
-        "n_samples": int(len(all_values)),
-        "group_names": group_names,
-    }
-
-
-def run_tukey_hsd(subset_df: pd.DataFrame,
-                  value_col: str = "tempC",
-                  group_col: str = "zone") -> pd.DataFrame | None:
-    """Tukey HSD post-hoc voor paarsgewijze zone-vergelijkingen."""
-    sub = subset_df.dropna(subset=[value_col, group_col])
-    if sub[group_col].nunique() < 2:
-        return None
-    tukey = pairwise_tukeyhsd(sub[value_col], sub[group_col])
-    return pd.DataFrame(tukey._results_table.data[1:],
-                        columns=tukey._results_table.data[0])
-
-
-def interpret_eta_squared(eta_sq: float) -> str:
-    """Vertaal η² naar Cohen's standaardlabels."""
-    if eta_sq < 0.01:
-        return "verwaarloosbaar"
-    if eta_sq < 0.06:
-        return "klein"
-    if eta_sq < 0.14:
-        return "middel"
-    return "groot"
 
 
 # --------------------------------------------------------------------------
@@ -1661,97 +1597,68 @@ with tab_zones:
                 "bevinding robuust voor de wijziging in methodologie."
             )
 
-        # --- Statistische analyse: ANOVA + Tukey HSD ---------------------
-        st.markdown("### 📊 Statistische analyse")
+        # --- Gemiddelde temperatuur per zone ---------------------------------
+        st.markdown("### 🌡️ Gemiddelde temperatuur per zone")
         st.caption(
-            "Eén-weg ANOVA toetst of de gemiddelde temperatuur significant "
-            "verschilt tussen zones. Een **lage p-waarde** (<0.05) betekent: de "
-            "verschillen tussen zones zijn groter dan we door toeval zouden "
-            "verwachten. **η² (eta-squared)** is de effectgrootte — welk deel "
-            "van de variantie wordt verklaard door zone. Cohen-richtlijnen: "
-            "0.01 klein, 0.06 middel, 0.14 groot."
+            "Gemiddelde drift-gecorrigeerde temperatuur per zone. "
+            "Drift-correctie verwijdert de geleidelijke opwarming van de sensor "
+            "zelf, zodat het ruimtelijke signaal overblijft."
         )
-
-        if is_compare:
-            anova_cols = st.columns(len(sensor_session_order))
-            for col_st, s in zip(anova_cols, sensor_session_order):
-                with col_st:
-                    st.markdown(f"**{s}**")
-                    sub_anova = z[z["session"] == s]
-                    result = run_zone_anova(sub_anova)
-                    if result is None:
-                        st.info("Te weinig data voor ANOVA in deze sessie.")
-                        continue
-
-                    sig_emoji = "✅" if result["p"] < 0.05 else "⚠️"
-                    sig_label = "significant" if result["p"] < 0.05 else "niet significant"
-                    p_text = f"{result['p']:.4f}" if result['p'] >= 0.0001 else "<0.0001"
-
-                    st.markdown(
-                        f"- **F**({result['n_groups']-1}, "
-                        f"{result['n_samples']-result['n_groups']}) "
-                        f"= {result['F']:.2f}\n"
-                        f"- **p** = {p_text} {sig_emoji} ({sig_label})\n"
-                        f"- **η²** = {result['eta_squared']:.3f} "
-                        f"({interpret_eta_squared(result['eta_squared'])} effect)\n"
-                        f"- **N** = {result['n_samples']} metingen over "
-                        f"{result['n_groups']} zones"
-                    )
-
-                    # Tukey HSD alleen tonen als ANOVA significant
-                    if result["p"] < 0.05:
-                        tukey = run_tukey_hsd(sub_anova)
-                        if tukey is not None:
-                            with st.expander("Tukey HSD post-hoc (paarsgewijze vergelijkingen)"):
-                                st.dataframe(tukey, use_container_width=True,
-                                             hide_index=True)
-                                st.caption(
-                                    "`reject=True` betekent dat het paar zones "
-                                    "significant verschilt (na correctie voor "
-                                    "meervoudig toetsen)."
-                                )
-        else:
-            result = run_zone_anova(z)
-            if result is None:
-                st.info("Te weinig data voor ANOVA met de huidige filters.")
+        _mean_rows = []
+        for zone_name in zone_order:
+            sub_z = z[z["zone"] == zone_name]
+            if is_compare:
+                for s in sensor_session_order:
+                    sub_zs = sub_z[sub_z["session"] == s]["tempC_detrended"].dropna()
+                    if len(sub_zs):
+                        _mean_rows.append({
+                            "zone": zone_name, "sessie": s,
+                            "gem_temp": round(sub_zs.mean(), 2),
+                            "n": len(sub_zs),
+                        })
             else:
-                sig_emoji = "✅" if result["p"] < 0.05 else "⚠️"
-                sig_label = "significant" if result["p"] < 0.05 else "niet significant"
-                p_text = f"{result['p']:.4f}" if result['p'] >= 0.0001 else "<0.0001"
+                sub_zs = sub_z["tempC_detrended"].dropna()
+                if len(sub_zs):
+                    _mean_rows.append({
+                        "zone": zone_name,
+                        "gem_temp": round(sub_zs.mean(), 2),
+                        "n": len(sub_zs),
+                    })
 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("F-statistiek",
-                          f"{result['F']:.2f}",
-                          help=f"df_tussen = {result['n_groups']-1}, "
-                               f"df_binnen = {result['n_samples']-result['n_groups']}")
-                c2.metric("p-waarde", p_text,
-                          delta=sig_label, delta_color="off")
-                c3.metric("η² (effectgrootte)",
-                          f"{result['eta_squared']:.3f}",
-                          delta=interpret_eta_squared(result['eta_squared']),
-                          delta_color="off")
-                c4.metric("N", f"{result['n_samples']}")
-
-                if result["p"] < 0.05:
-                    tukey = run_tukey_hsd(z)
-                    if tukey is not None:
-                        with st.expander("Tukey HSD post-hoc (paarsgewijze vergelijkingen)"):
-                            st.dataframe(tukey, use_container_width=True, hide_index=True)
-                            st.caption(
-                                "`reject=True` betekent dat het paar zones "
-                                "significant verschilt (na correctie voor "
-                                "meervoudig toetsen)."
-                            )
-
-        st.caption(
-            "⚠️ **Caveat**: ANOVA veronderstelt onafhankelijke metingen en "
-            "ongeveer-normaal verdeelde residuen. Onze metingen zijn "
-            "auto-gecorreleerd (opeenvolgende sensorwaarden hangen samen) en "
-            "verstrengeld met tijd-van-dag (zones zijn op verschillende "
-            "momenten bezocht). Behandel deze toetsen als richtinggevend, niet "
-            "als definitief bewijs. Met meer runs wordt een mixed-effects model "
-            "met sessie als random effect en tijd als covariaat passender."
-        )
+        if _mean_rows:
+            _mean_df = pd.DataFrame(_mean_rows)
+            if is_compare:
+                fig_mean = px.bar(
+                    _mean_df, x="zone", y="gem_temp", color="sessie",
+                    barmode="group",
+                    category_orders={"zone": zone_order, "sessie": sensor_session_order},
+                    color_discrete_map=SESSION_COLOURS,
+                    template="plotly_dark",
+                    labels={"gem_temp": "Gem. temperatuur (°C)", "zone": "", "sessie": ""},
+                    text="gem_temp",
+                )
+            else:
+                fig_mean = px.bar(
+                    _mean_df, x="zone", y="gem_temp", color="zone",
+                    category_orders={"zone": zone_order},
+                    color_discrete_map=ZONE_COLOURS,
+                    template="plotly_dark",
+                    labels={"gem_temp": "Gem. temperatuur (°C)", "zone": ""},
+                    text="gem_temp",
+                )
+                fig_mean.update_layout(showlegend=False)
+            fig_mean.update_traces(texttemplate="%{text:.2f} °C", textposition="outside",
+                                   textfont=dict(size=11))
+            fig_mean.update_layout(
+                height=360,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+                margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(gridcolor="#334155"),
+                yaxis=dict(gridcolor="#334155"),
+                legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                            bordercolor="#334155", borderwidth=1),
+            )
+            st.plotly_chart(fig_mean, use_container_width=True)
 
         # --- Licht vs Temperatuur scatter --------------------------------
         st.markdown("**Licht vs temperatuur**")
