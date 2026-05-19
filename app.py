@@ -865,8 +865,8 @@ for s in sensor_session_order:
         "duration_min": end_min,
     }
 
-# --- Kaart-layout: 3 inzicht-kaarten naast elkaar ---
-col1, col2, col3 = st.columns(3)
+# --- Kaart-layout: 4 inzicht-kaarten naast elkaar ---
+col1, col2, col3, col4 = st.columns(4)
 
 # Kaart 1: aantal metingen + dataset-overzicht
 with col1:
@@ -928,6 +928,34 @@ with col3:
         f"""<div class="insight-card insight-card--green">
           <p class="card-title">🔄 Route-omkering test</p>
           <p class="card-body">{route_body}</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+# Kaart 4: bodemgebruik-verrassingsbevinding
+with col4:
+    _lc_rows_card = []
+    for zone_name, lc_data in land_cover.items():
+        kl = lc_data["klasse"]
+        _lc_rows_card.append((zone_name, kl.get("verhard", 0), kl.get("groen", 0)))
+    _most_verhard = max(_lc_rows_card, key=lambda x: x[1])
+    _most_groen   = max(_lc_rows_card, key=lambda x: x[2])
+    if _most_verhard[0] == _most_groen[0]:
+        lc_body = (
+            f"<strong>{_most_verhard[0]}</strong> heeft zowel het meeste verhard "
+            f"(<strong>{_most_verhard[1]:.0f}%</strong>) als het meeste groen "
+            f"(<strong>{_most_verhard[2]:.0f}%</strong>) op buurtniveau &mdash; "
+            f"het UHI-effect wordt hier eerder door asfalttype dan door groengebrek verklaard."
+        )
+    else:
+        lc_body = (
+            f"Meest verhard: <strong>{_most_verhard[0]}</strong> ({_most_verhard[1]:.0f}%). "
+            f"Meest groen: <strong>{_most_groen[0]}</strong> ({_most_groen[2]:.0f}%)."
+        )
+    st.markdown(
+        f"""<div class="insight-card insight-card--blue">
+          <p class="card-title">🗺️ Bodemgebruik</p>
+          <p class="card-body">{lc_body}</p>
         </div>""",
         unsafe_allow_html=True,
     )
