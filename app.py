@@ -1521,8 +1521,7 @@ with tab_zones:
     else:
         st.caption(
             "Elke GPS-fix wordt toegewezen aan een zone (Museumplein, Frans Halsbuurt, "
-            "Sarphatipark) of *Onderweg* als hij buiten alle drie valt. Pas de "
-            "`ZONES`-dict in `app.py` aan om grenzen te verfijnen."
+            "Sarphatipark) of *Onderweg* als hij buiten alle drie valt."
         )
 
     c1, c2 = st.columns(2)
