@@ -21,7 +21,7 @@ import streamlit as st
 
 # Statistische toetsen
 from scipy import stats as scipy_stats
-from scipy.spatial.distance import cdist
+
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
 # Voor KNMI-API requests en OSM Overpass
@@ -208,14 +208,6 @@ hr { border-color: #334155 !important; opacity: 1; }
 WGS84 = "EPSG:4326"
 RD_NEW = "EPSG:28992"
 
-# --------------------------------------------------------------------------
-# Zone-definities (Amsterdam) — pas centra/stralen aan voor je transect
-# --------------------------------------------------------------------------
-ZONES = {
-    "Museumplein":     {"lon": 4.8810, "lat": 52.3580, "radius_m": 200, "surface": "verhard"},
-    "Frans Halsbuurt": {"lon": 4.8920, "lat": 52.3563, "radius_m": 150, "surface": "verhard"},
-    "Sarphatipark":    {"lon": 4.8950, "lat": 52.3540, "radius_m": 120, "surface": "boomkroon"},
-}
 ZONE_COLOURS = {
     "Museumplein":     "#ef4444",
     "Frans Halsbuurt": "#3b82f6",
@@ -278,90 +270,44 @@ MAP_STYLES = {
 # --------------------------------------------------------------------------
 # Geo-hulpfuncties
 # --------------------------------------------------------------------------
-def load_or_fetch_zone_boundaries() -> dict[str, dict]:
-    """Geef zone-coördinaten terug vanuit het snapshot-bestand als dat bestaat,
-    anders haal ze op via de Amsterdam API en OSM en sla ze op in het bestand.
+_ZONE_DIR = Path(__file__).parent / "data" / "zone"
 
-    Formaat van het snapshot-bestand:
-    {
-      "<zone>": {"coords": [[lat, lon], ...], "source": "<Amsterdam API|OSM>"}
-    }
+# CBS buurtnaam → dashboard zone label
+_BUURT_TO_ZONE = {
+    "Museumplein":      "Museumplein",
+    "Frans Halsbuurt":  "Frans Halsbuurt",
+    "Sarphatiparkbuurt": "Sarphatipark",
+}
 
-    Zones die niet in het bestand staan worden later in build_zones_gdf()
-    afgehandeld via de cirkelbuffer-fallback.
-    """
-    if ZONE_BOUNDARIES_PATH.exists():
-        with open(ZONE_BOUNDARIES_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-
-    ams = fetch_amsterdam_boundaries()
-    osm = fetch_osm_boundaries()
-
-    snapshot: dict[str, dict] = {}
-    for zone in ZONES:
-        if zone in ams:
-            snapshot[zone] = {"coords": ams[zone], "source": "Amsterdam API"}
-        elif zone in osm:
-            snapshot[zone] = {"coords": osm[zone], "source": "OSM"}
-
-    ZONE_BOUNDARIES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(ZONE_BOUNDARIES_PATH, "w", encoding="utf-8") as fh:
-        json.dump(snapshot, fh)
-
-    return snapshot
+# Bodemgebruik-bestanden per zone (klasse-oppervlakken in m²)
+_LAND_COVER_FILES = {
+    "Frans Halsbuurt": "FransHalsbuurt_opp.geojson",
+    "Museumplein":     "Museumplein_opp.geojson",
+    "Sarphatipark":    "Sarphatiparkbuurt_opp.geojson",
+}
 
 
+@st.cache_data(show_spinner=False)
 def build_zones_gdf() -> gpd.GeoDataFrame:
-    """Bouw een GeoDataFrame van zone-polygonen in RD New (EPSG:28992).
+    """Laad precieze CBS-buurtgrenzen uit het lokale GeoJSON-bestand."""
+    gdf = gpd.read_file(_ZONE_DIR / "gekozen_wijken.geojson")
+    gdf = gdf[gdf["buurtnaam"].isin(_BUURT_TO_ZONE)].copy()
+    gdf["zone"]    = gdf["buurtnaam"].map(_BUURT_TO_ZONE)
+    gdf["_source"] = "GeoJSON (CBS buurtgrenzen)"
+    return gdf[["zone", "_source", "geometry"]].to_crs(RD_NEW).reset_index(drop=True)
 
-    Prioriteit per zone:
-      1. Snapshot-bestand data/zone_boundaries.json (lokaal, instant)
-      2. Gemeente Amsterdam DataPlatform (eerste run / na refresh)
-      3. OpenStreetMap Overpass (eerste run / na refresh)
-      4. Cirkelbuffer om het gedefinieerde middelpunt (altijd beschikbaar)
 
-    Resultaat in RD New zodat assign_zones_via_sjoin correct in meters rekent.
-    """
-    snapshot = load_or_fetch_zone_boundaries()
-    ams = {z: v["coords"] for z, v in snapshot.items() if v.get("source") == "Amsterdam API"}
-    osm = {z: v["coords"] for z, v in snapshot.items() if v.get("source") == "OSM"}
-
-    geoms_rd:   list = []
-    zone_names: list = []
-    zone_surfs: list = []
-    sources:    list = []   # voor eventuele debug-logging
-
-    for name, spec in ZONES.items():
-        latlon = ams.get(name) or osm.get(name) or []
-
-        if len(latlon) > 3:
-            source = "Amsterdam API" if name in ams else "OSM"
-            poly_wgs = Polygon([(c[1], c[0]) for c in latlon])
-            geom = (
-                gpd.GeoDataFrame([{}], geometry=[poly_wgs], crs=WGS84)
-                .to_crs(RD_NEW)
-                .geometry.iloc[0]
-            )
-        else:
-            source = "cirkel (fallback)"
-            pt_rd = (
-                gpd.GeoDataFrame([{}], geometry=[Point(spec["lon"], spec["lat"])], crs=WGS84)
-                .to_crs(RD_NEW)
-                .geometry.iloc[0]
-            )
-            geom = pt_rd.buffer(spec["radius_m"])
-
-        geoms_rd.append(geom)
-        zone_names.append(name)
-        zone_surfs.append(spec["surface"])
-        sources.append(source)
-
-    gdf = gpd.GeoDataFrame(
-        {"zone": zone_names, "surface": zone_surfs, "_source": sources},
-        geometry=geoms_rd,
-        crs=RD_NEW,
-    )
-    return gdf[["zone", "surface", "_source", "geometry"]]
+@st.cache_data(show_spinner=False)
+def load_land_cover() -> dict[str, dict]:
+    """Bereken bodemgebruik-percentages (verhard/groen/gebouw/water) per zone."""
+    result = {}
+    for zone, fname in _LAND_COVER_FILES.items():
+        gdf = gpd.read_file(_ZONE_DIR / fname)
+        totals = gdf.groupby("klasse")["opp"].sum()
+        total  = totals.sum()
+        result[zone] = {k: round(float(v / total * 100), 1)
+                        for k, v in totals.items()}
+    return result
 
 
 def assign_zones_via_sjoin(df: pd.DataFrame, zones_gdf: gpd.GeoDataFrame) -> pd.Series:
@@ -451,108 +397,6 @@ def add_drift_correction(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
-def compute_morans(
-    lat_arr: np.ndarray,
-    lon_arr: np.ndarray,
-    values_arr: np.ndarray,
-    threshold_m: int = 200,
-    max_pts: int = 800,
-    n_perms: int = 499,
-) -> dict:
-    """Global Moran's I + Local LISA statistics for a set of GPS-tagged values.
-
-    Uses a distance-band spatial weights matrix (row-standardised): W_ij = 1
-    if the great-circle distance between points i and j is ≤ threshold_m,
-    W_ij = 0 otherwise.  Points with no neighbours within the threshold are
-    excluded (isolated points don't contribute meaningful autocorrelation).
-
-    The global p-value is estimated via a permutation test (n_perms shuffles).
-
-    Local cluster types (LISA):
-      HH – High-High  : hot spot  (high value surrounded by high values)
-      LL – Low-Low    : cold spot  (low  value surrounded by low  values)
-      HL – High-Low   : warm outlier in a cool neighbourhood
-      LH – Low-High   : cool outlier in a warm neighbourhood
-    """
-    # --- subsample to keep the n×n distance matrix tractable ----------------
-    n_full = len(lat_arr)
-    if n_full > max_pts:
-        idx = np.round(np.linspace(0, n_full - 1, max_pts)).astype(int)
-        lat_arr    = lat_arr[idx]
-        lon_arr    = lon_arr[idx]
-        values_arr = values_arr[idx]
-
-    # Convert to approximate metres via RD New projection
-    pts_wgs = np.column_stack([lon_arr, lat_arr])
-    gdf_pts = gpd.GeoDataFrame(
-        geometry=gpd.points_from_xy(lon_arr, lat_arr), crs=WGS84
-    ).to_crs(RD_NEW)
-    xy_m = np.column_stack([gdf_pts.geometry.x, gdf_pts.geometry.y])
-
-    # --- distance-band weight matrix (dense, feasible for ≤ 800 pts) --------
-    D = cdist(xy_m, xy_m)
-    W = (D < threshold_m).astype(float)
-    np.fill_diagonal(W, 0)
-
-    # Drop isolated points (no neighbours)
-    has_neighbours = W.sum(axis=1) > 0
-    W          = W[has_neighbours][:, has_neighbours]
-    lat_use    = lat_arr[has_neighbours]
-    lon_use    = lon_arr[has_neighbours]
-    vals_use   = values_arr[has_neighbours]
-
-    n = len(vals_use)
-    if n < 5:
-        return {"error": "Te weinig buren gevonden — vergroot threshold of voeg meer data toe."}
-
-    # Row-standardise
-    row_sums = W.sum(axis=1, keepdims=True)
-    W = W / row_sums
-
-    z   = vals_use - vals_use.mean()
-    s2  = (z ** 2).mean()
-    S0  = W.sum()
-    Wz  = W @ z
-
-    # Global Moran's I
-    I = float((n / S0) * (z @ Wz) / (z @ z))
-
-    # Permutation p-value
-    rng = np.random.default_rng(42)
-    perm_I = np.array([
-        float((n / S0) * ((rng.permutation(z)) @ (W @ rng.permutation(z))) / (z @ z))
-        for _ in range(n_perms)
-    ])
-    p_value = float((np.abs(perm_I) >= abs(I)).sum() + 1) / (n_perms + 1)
-
-    # Local Moran's I (LISA)
-    local_I = (z * Wz) / s2
-
-    cluster = []
-    for zi, li in zip(z, local_I):
-        if   li > 0 and zi > 0: cluster.append("HH")
-        elif li > 0 and zi < 0: cluster.append("LL")
-        elif li < 0 and zi > 0: cluster.append("HL")
-        elif li < 0 and zi < 0: cluster.append("LH")
-        else:                    cluster.append("NS")
-
-    return {
-        "I":            I,
-        "p_value":      p_value,
-        "n_used":       n,
-        "n_full":       n_full,
-        "threshold_m":  threshold_m,
-        "local_I":      local_I,
-        "cluster":      np.array(cluster),
-        "z":            z,
-        "spatial_lag":  Wz,
-        "lat":          lat_use,
-        "lon":          lon_use,
-        "vals":         vals_use,
-    }
-
-
 def clean_sensor_data(df: pd.DataFrame, drop_glitches: bool) -> pd.DataFrame:
     """Maskeer optioneel duidelijke sensorstoringen."""
     df = df.copy()
@@ -580,182 +424,7 @@ KNMI_ENDPOINT = "https://www.daggegevens.knmi.nl/klimatologie/uurgegevens"
 KNMI_STATION_SCHIPHOL = 240
 
 # --------------------------------------------------------------------------
-# OpenStreetMap Overpass — echte zone-grenzen
-# --------------------------------------------------------------------------
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-
-# Bounding box ruim rond Museumkwartier / Oud-Zuid
-_OSM_BBOX = "52.34,4.86,52.37,4.92"
-
-# Overpass QL queries per zone.
-# Sarphatipark en Museumplein zijn gesloten 'way'-elementen (enkelvoudige
-# polygonen). Frans Halsbuurt is een buurtgrens die als 'relation' bestaat;
-# de fallback probeert ook een way met dezelfde naam.
-_OSM_QUERIES = {
-    "Sarphatipark": (
-        f'[out:json][timeout:15];'
-        f'way["name"="Sarphatipark"]["leisure"="park"]({_OSM_BBOX});'
-        f'out geom;'
-    ),
-    # Museumplein kan in OSM als park, recreatieterrein of plein getagd zijn;
-    # we proberen alle drie in één union-query zodat altijd de grootste gesloten
-    # way als buitengrens wordt teruggegeven.
-    "Museumplein": (
-        f'[out:json][timeout:15];'
-        f'('
-        f'  way["name"="Museumplein"]["leisure"="park"]({_OSM_BBOX});'
-        f'  way["name"="Museumplein"]["landuse"="recreation_ground"]({_OSM_BBOX});'
-        f'  way["name"="Museumplein"]["place"="square"]({_OSM_BBOX});'
-        f'  way["name"="Museumplein"]["leisure"="common"]({_OSM_BBOX});'
-        f');'
-        f'out geom;'
-    ),
-    "Frans Halsbuurt": (
-        f'[out:json][timeout:15];'
-        f'(relation["name"="Frans Halsbuurt"]({_OSM_BBOX});'
-        f'way["name"="Frans Halsbuurt"]({_OSM_BBOX}););'
-        f'out geom members;'
-    ),
-}
-
-
-@st.cache_data(ttl=86_400 * 7, show_spinner=False)
-def fetch_osm_boundaries() -> dict[str, list[tuple[float, float]]]:
-    """Haal echte OSM-polygoonranden op voor de drie meetzones.
-
-    Geeft per zone een lijst van (lat, lon)-tuples terug die de buitenrand
-    van het vlak beschrijven. Bij een netwerk- of parsefout voor een zone
-    wordt die zone niet in de dict opgenomen — build_zones_gdf() valt dan
-    terug op de cirkelbuffer voor die zone.
-
-    Resultaat wordt 7 dagen gecached; grenzen veranderen zelden.
-    """
-    boundaries: dict[str, list[tuple[float, float]]] = {}
-
-    for zone, query in _OSM_QUERIES.items():
-        try:
-            post_data = urllib.parse.urlencode({"data": query}).encode()
-            req = urllib.request.Request(
-                OVERPASS_URL,
-                data=post_data,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent":   "microclimate-dashboard/1.0",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            continue  # silently fall back to circle for this zone
-
-        coords: list[tuple[float, float]] = []
-
-        # Fase 1: verzamel alle gesloten way-elementen en neem de grootste.
-        # Bij een union-query (bijv. Museumplein) komen meerdere ways terug;
-        # de langste way is normaal de buitenrand van het gehele terrein.
-        way_candidates: list[list[tuple[float, float]]] = []
-        for el in result.get("elements", []):
-            if el["type"] == "way" and "geometry" in el:
-                pts = [(pt["lat"], pt["lon"]) for pt in el["geometry"]]
-                if len(pts) > 3:
-                    way_candidates.append(pts)
-
-        if way_candidates:
-            coords = max(way_candidates, key=len)
-
-        # Fase 2: als geen bruikbare way gevonden, probeer relation-leden samen te voegen.
-        # Dit is de fallback voor Frans Halsbuurt als OSM-query wordt gebruikt.
-        if not coords:
-            for el in result.get("elements", []):
-                if el["type"] == "relation":
-                    lines = []
-                    for member in el.get("members", []):
-                        if (member.get("type") == "way"
-                                and member.get("role") in ("outer", "")
-                                and "geometry" in member):
-                            pts = [(pt["lon"], pt["lat"]) for pt in member["geometry"]]
-                            if len(pts) >= 2:
-                                lines.append(LineString(pts))
-                    if lines:
-                        merged = linemerge(lines)
-                        polys  = list(polygonize(merged))
-                        if polys:
-                            outer = unary_union(polys)
-                            if outer.geom_type == "MultiPolygon":
-                                outer = max(outer.geoms, key=lambda g: g.area)
-                            coords = [(y, x) for x, y in outer.exterior.coords]
-                            break
-
-        if len(coords) > 3:
-            boundaries[zone] = coords
-
-    return boundaries
-
-
-# --------------------------------------------------------------------------
-# Gemeente Amsterdam DataPlatform — officiële buurt-/gebiedsgrenzen
-# --------------------------------------------------------------------------
-AMS_API_BASE = "https://api.data.amsterdam.nl/v1"
-
-# Snapshot-bestand: coördinaten worden hier opgeslagen na de eerste fetch
-# zodat de app nooit meer externe API's hoeft te raadplegen.
-ZONE_BOUNDARIES_PATH = Path(__file__).parent / "data" / "zone_boundaries.json"
-
-
-@st.cache_data(ttl=86_400 * 7, show_spinner=False)
-def fetch_amsterdam_boundaries() -> dict[str, list[tuple[float, float]]]:
-    """Haal officiële polygoonranden op van de Gemeente Amsterdam DataPlatform API.
-
-    Momenteel ondersteund:
-      • Frans Halsbuurt — gebieden/buurten (officiële buurtgrens, veel preciezer
-        dan de OSM-relatie die soms onvolledige leden heeft).
-
-    Geeft {zone_naam: [(lat, lon), ...]} terug.
-    Bij netwerk- of parsefout wordt die zone stilletjes overgeslagen;
-    build_zones_gdf() valt dan terug op de OSM-query of cirkelbuffer.
-    """
-    boundaries: dict[str, list[tuple[float, float]]] = {}
-
-    # --- Frans Halsbuurt: officiële buurtgrens --------------------------------
-    # De Amsterdam DataPlatform v1 API geeft met ?_format=geojson standaard
-    # WGS84-coördinaten terug in GeoJSON-volgorde [lon, lat].
-    try:
-        url = (
-            f"{AMS_API_BASE}/gebieden/buurten/"
-            "?naam=Frans+Halsbuurt&_format=geojson"
-        )
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "microclimate-dashboard/1.0",
-                "Accept":     "application/geo+json, application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-
-        for feature in data.get("features", []):
-            geom  = feature.get("geometry", {})
-            gtype = geom.get("type", "")
-
-            if gtype == "Polygon":
-                ring = geom["coordinates"][0]
-            elif gtype == "MultiPolygon":
-                # Neem de ring met de meeste punten (grootste buitenring)
-                ring = max(geom["coordinates"], key=lambda p: len(p[0]))[0]
-            else:
-                continue
-
-            if len(ring) > 3:
-                # GeoJSON-coördinaten zijn [lon, lat] → omzetten naar (lat, lon)
-                boundaries["Frans Halsbuurt"] = [
-                    (float(c[1]), float(c[0])) for c in ring
-                ]
-                break
-    except Exception:
-        pass  # stille fallback naar OSM / cirkel
-
-    return boundaries
+# KNMI weer-data — de OSM/API zone-fetch is vervangen door lokale GeoJSONs
 
 
 class KNMIFetchError(Exception):
@@ -1041,17 +710,7 @@ df["zone"] = assign_zones_via_sjoin(df, zones_gdf)
 # alle sensor-analyses uitsluitend op Dag 1 / Dag 2 draaien.
 df_sensor = df[~df["session"].isin(GPS_ONLY_SESSIONS)].copy()
 
-# Toon databron per zone in de zijbalk (Amsterdam API / OSM / cirkel)
-_source_icons = {"Amsterdam API": "🏛️", "OSM": "🗺️", "cirkel (fallback)": "⭕"}
-with st.sidebar.expander("📍 Zonegrenzen — databron", expanded=False):
-    for _, zrow in zones_gdf.iterrows():
-        icon = _source_icons.get(zrow["_source"], "•")
-        st.caption(f"{icon} **{zrow['zone']}**: {zrow['_source']}")
-    _snapshot_exists = ZONE_BOUNDARIES_PATH.exists()
-    st.caption(f"📁 Snapshot: {'aanwezig' if _snapshot_exists else 'niet aanwezig'}")
-    if st.button("🔄 Grenzen vernieuwen", help="Verwijdert de lokale snapshot en herlaadt grenzen van Amsterdam API / OSM"):
-        ZONE_BOUNDARIES_PATH.unlink(missing_ok=True)
-        st.rerun()
+land_cover = load_land_cover()
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
 # Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
@@ -1441,8 +1100,8 @@ st.divider()
 # --------------------------------------------------------------------------
 # Tabs
 # --------------------------------------------------------------------------
-tab_time, tab_map, tab_zones, tab_corr, tab_spatial, tab_data = st.tabs(
-    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🔗 Correlaties", "🔬 Ruimtelijke autocorr.", "📋 Ruwe data"]
+tab_time, tab_map, tab_zones, tab_corr, tab_data = st.tabs(
+    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🔗 Correlaties", "📋 Ruwe data"]
 )
 
 # ---- Tijdreeks ----------------------------------------------------------
@@ -2111,6 +1770,73 @@ with tab_zones:
             "voorbehoud in je discussie."
         )
 
+        # --- Bodemgebruik per zone ----------------------------------------
+        st.markdown("### 🌿 Bodemgebruik per zone")
+        st.caption(
+            "Oppervlakteaandelen op basis van het BGT-bodemgebruiksbestand. "
+            "Meer verhard oppervlak betekent meer warmte-absorptie overdag en "
+            "minder verdampingskoeling — dit is de fysische basis van het "
+            "Urban Heat Island effect dat we meten."
+        )
+
+        _klasse_colours = {
+            "verhard":  "#94a3b8",
+            "gebouw":   "#64748b",
+            "groen":    "#22c55e",
+            "water":    "#38bdf8",
+        }
+        lc_rows = []
+        for zone_name, klassen in land_cover.items():
+            for klasse, pct in klassen.items():
+                lc_rows.append({"zone": zone_name, "klasse": klasse, "percentage": pct})
+        lc_df = pd.DataFrame(lc_rows)
+
+        fig_lc = px.bar(
+            lc_df,
+            x="zone", y="percentage", color="klasse",
+            category_orders={
+                "zone":   list(ZONE_COLOURS.keys()),
+                "klasse": ["verhard", "gebouw", "groen", "water"],
+            },
+            color_discrete_map=_klasse_colours,
+            template="plotly_dark",
+            labels={"percentage": "Oppervlakteaandeel (%)", "zone": "", "klasse": ""},
+            text="percentage",
+        )
+        fig_lc.update_traces(texttemplate="%{text:.0f}%", textposition="inside",
+                             textfont=dict(size=11))
+        fig_lc.update_layout(
+            barmode="stack",
+            height=340,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=10, b=10),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
+            xaxis=dict(gridcolor="#334155"),
+            yaxis=dict(gridcolor="#334155", range=[0, 102]),
+        )
+        st.plotly_chart(fig_lc, use_container_width=True)
+
+        # Koppel bodemgebruik aan gemeten temperatuur
+        _lc_temp_rows = []
+        for zone_name in land_cover:
+            zone_sub = z[z["zone"] == zone_name]["tempC_detrended"].dropna()
+            lc = land_cover[zone_name]
+            if len(zone_sub):
+                _lc_temp_rows.append({
+                    "Zone":              zone_name,
+                    "% verhard":         lc.get("verhard", 0),
+                    "% groen":           lc.get("groen",   0),
+                    "Gem. temp. (°C)":   round(zone_sub.mean(), 2),
+                    "n metingen":        len(zone_sub),
+                })
+        if _lc_temp_rows:
+            st.dataframe(
+                pd.DataFrame(_lc_temp_rows).set_index("Zone"),
+                use_container_width=True,
+            )
+
 
 # ---- Correlaties ---------------------------------------------------------
 with tab_corr:
@@ -2200,185 +1926,6 @@ with tab_corr:
     )
     st.plotly_chart(fig2, use_container_width=True)
 
-
-# ---- Ruwe data -----------------------------------------------------------
-# ---- Ruimtelijke autocorrelatie -----------------------------------------
-with tab_spatial:
-    st.subheader("Ruimtelijke autocorrelatie — Moran's I")
-
-    sa_col1, sa_col2 = st.columns([1, 1])
-    threshold_m = sa_col1.slider(
-        "Afstandsdrempel (m)", min_value=50, max_value=500, value=200, step=25,
-        help="Twee punten gelden als buren als hun onderlinge afstand ≤ deze waarde is.",
-    )
-    sa_session = sa_col2.selectbox(
-        "Sessie", options=sensor_session_order, index=0,
-        help="Moran's I wordt per sessie berekend (gecombineerde data vermengt twee routes).",
-    )
-
-    sa_df = df_sensor[(df_sensor["session"] == sa_session)].dropna(
-        subset=["lat_dec", "lon_dec", "tempC_detrended"]
-    )
-
-    if len(sa_df) < 10:
-        st.info("Te weinig geldige GPS+temperatuurmetingen voor deze sessie.")
-    else:
-        moran = compute_morans(
-            sa_df["lat_dec"].values,
-            sa_df["lon_dec"].values,
-            sa_df["tempC_detrended"].values,
-            threshold_m=threshold_m,
-        )
-
-        if "error" in moran:
-            st.warning(moran["error"])
-        else:
-            # ── Global Moran's I ────────────────────────────────────────────
-            st.markdown("#### Globale Moran's I")
-            gi1, gi2, gi3, gi4 = st.columns(4)
-            gi1.metric("Moran's I", f"{moran['I']:.4f}")
-            gi2.metric("p-waarde (permutatie)", f"{moran['p_value']:.4f}")
-            gi3.metric("Punten gebruikt", f"{moran['n_used']} / {moran['n_full']}")
-            gi4.metric("Drempel", f"{moran['threshold_m']} m")
-
-            # Interpretation card
-            I_val  = moran["I"]
-            p_val  = moran["p_value"]
-            sig    = p_val < 0.05
-            if sig and I_val > 0.3:
-                _interp = ("Sterke <strong>positieve</strong> ruimtelijke autocorrelatie: nabijgelegen "
-                           "metingen hebben sterk vergelijkbare temperaturen. "
-                           "Dit valideert de zone-indeling statisch.")
-                _variant = "blue"
-            elif sig and I_val > 0:
-                _interp = ("Zwakke maar significante positieve ruimtelijke autocorrelatie: "
-                           "nabijgelegen punten zijn iets warmer/koeler dan gemiddeld samen.")
-                _variant = "blue"
-            elif sig and I_val < 0:
-                _interp = ("Negatieve ruimtelijke autocorrelatie: temperaturen wisselen sterk "
-                           "af tussen nabijgelegen punten — ongewoon patroon.")
-                _variant = "amber"
-            else:
-                _interp = ("Geen significante ruimtelijke autocorrelatie gevonden (p ≥ 0.05). "
-                           "Temperatuurpatroon is niet aantoonbaar geclusterd op deze schaal.")
-                _variant = "amber"
-
-            st.markdown(
-                f'<div class="insight-card insight-card--{_variant}">'
-                f'<p class="card-body">{_interp}</p></div>',
-                unsafe_allow_html=True,
-            )
-
-            # ── Moran Scatter Plot ──────────────────────────────────────────
-            st.markdown("#### Moran-spreidingsdiagram")
-            st.caption(
-                "Elk punt = één GPS-meting. X-as: gestandaardiseerde temperatuur (z). "
-                "Y-as: gewogen gemiddelde van buren (ruimtelijke lag). "
-                "Punten rechtsboven (HH) en linksonder (LL) bevestigen ruimtelijke clustering."
-            )
-
-            scatter_df = pd.DataFrame({
-                "z":           moran["z"],
-                "spatial_lag": moran["spatial_lag"],
-                "cluster":     moran["cluster"],
-            })
-
-            LISA_COLOURS = {
-                "HH": "#ef4444",   # rood — warmte-hotspot
-                "LL": "#3b82f6",   # blauw — koude-coldspot
-                "HL": "#f97316",   # oranje — warme uitbijter in koele omgeving
-                "LH": "#a78bfa",   # paars — koele uitbijter in warme omgeving
-                "NS": "#475569",   # grijs — niet significant
-            }
-            LISA_LABELS = {
-                "HH": "HH – Warmte-hotspot",
-                "LL": "LL – Koude-coldspot",
-                "HL": "HL – Warm in koele omgeving",
-                "LH": "LH – Koel in warme omgeving",
-                "NS": "NS – Niet significant",
-            }
-
-            scatter_fig = go.Figure()
-            for ctype, colour in LISA_COLOURS.items():
-                sub = scatter_df[scatter_df["cluster"] == ctype]
-                if sub.empty:
-                    continue
-                scatter_fig.add_trace(go.Scatter(
-                    x=sub["z"], y=sub["spatial_lag"],
-                    mode="markers",
-                    marker=dict(color=colour, size=5, opacity=0.7),
-                    name=LISA_LABELS[ctype],
-                ))
-            # Regression line (slope = Moran's I)
-            z_range = np.linspace(scatter_df["z"].min(), scatter_df["z"].max(), 100)
-            scatter_fig.add_trace(go.Scatter(
-                x=z_range, y=moran["I"] * z_range,
-                mode="lines",
-                line=dict(color="#38bdf8", width=2, dash="dash"),
-                name=f"Helling = I = {moran['I']:.3f}",
-            ))
-            scatter_fig.add_hline(y=0, line=dict(color="#475569", width=1))
-            scatter_fig.add_vline(x=0, line=dict(color="#475569", width=1))
-            scatter_fig.update_layout(
-                template="plotly_dark",
-                xaxis_title="Gestandaardiseerde temperatuur (z)",
-                yaxis_title="Ruimtelijke lag (Wz)",
-                height=420,
-                legend=dict(bgcolor="rgba(15,23,42,0.85)", bordercolor="#334155",
-                            borderwidth=1, font=dict(color="#cbd5e1")),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(30,41,59,0.6)",
-            )
-            st.plotly_chart(scatter_fig, use_container_width=True)
-
-            # ── LISA Hotspot Map ────────────────────────────────────────────
-            st.markdown("#### LISA-kaart — lokale hotspots & coldspots")
-            st.caption(
-                "Rood = warmte-hotspot (HH), blauw = koude-coldspot (LL), "
-                "oranje/paars = ruimtelijke uitbijters, grijs = niet significant."
-            )
-
-            map_style_sa = st.selectbox(
-                "Kaartstijl", list(MAP_STYLES.keys()), index=0, key="sa_map_style"
-            )
-
-            lisa_fig = go.Figure()
-            for ctype, colour in LISA_COLOURS.items():
-                mask = moran["cluster"] == ctype
-                if not mask.any():
-                    continue
-                lisa_fig.add_trace(go.Scattermap(
-                    lat=moran["lat"][mask],
-                    lon=moran["lon"][mask],
-                    mode="markers",
-                    marker=dict(size=10, color=colour, opacity=0.85),
-                    name=LISA_LABELS[ctype],
-                    hovertext=[
-                        f"{LISA_LABELS[ctype]}<br>Temp: {v:.2f} °C"
-                        for v in moran["vals"][mask]
-                    ],
-                    hoverinfo="text",
-                ))
-
-            lisa_fig.update_layout(
-                map=dict(
-                    style=MAP_STYLES[map_style_sa],
-                    center=dict(lat=float(moran["lat"].mean()),
-                                lon=float(moran["lon"].mean())),
-                    zoom=14,
-                ),
-                height=560,
-                margin=dict(l=0, r=0, t=0, b=0),
-                showlegend=True,
-                paper_bgcolor="rgba(0,0,0,0)",
-                legend=dict(bgcolor="rgba(15,23,42,0.85)", bordercolor="#334155",
-                            borderwidth=1, font=dict(color="#cbd5e1")),
-            )
-            st.plotly_chart(
-                lisa_fig, use_container_width=True,
-                config={"scrollZoom": True, "displayModeBar": True,
-                        "modeBarButtonsToRemove": ["lasso2d", "select2d"]},
-            )
 
 
 with tab_data:
