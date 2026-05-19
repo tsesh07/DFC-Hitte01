@@ -1941,7 +1941,7 @@ with tab_zones:
         if is_compare:
             st.caption(
                 "Als dezelfde zone-volgorde geldt over beide sessies (bv. Frans Halsbuurt "
-                "het warmst in beide, Sarphatipark het koelst in beide), is je ruimtelijke "
+                "het warmst in beide, Sarphatipark het koelst in beide), dan zijn de ruimtelijke "
                 "bevinding robuust voor de wijziging in methodologie."
             )
 
