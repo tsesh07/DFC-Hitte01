@@ -299,14 +299,39 @@ def build_zones_gdf() -> gpd.GeoDataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_land_cover() -> dict[str, dict]:
-    """Bereken bodemgebruik-percentages (verhard/groen/gebouw/water) per zone."""
+    """Bereken bodemgebruik-percentages per zone, inclusief subcategorieën."""
     result = {}
     for zone, fname in _LAND_COVER_FILES.items():
         gdf = gpd.read_file(_ZONE_DIR / fname)
+
+        # Hoofdklassen: verhard / groen / gebouw / water (% van totaal)
         totals = gdf.groupby("klasse")["opp"].sum()
         total  = totals.sum()
-        result[zone] = {k: round(float(v / total * 100), 1)
-                        for k, v in totals.items()}
+        klasse_pct = {k: round(float(v / total * 100), 1) for k, v in totals.items()}
+
+        # Verharding detail: gesloten vs open (% binnen verhard)
+        v_gdf   = gdf[gdf["klasse"] == "verhard"]
+        v_subs  = v_gdf.groupby("fysiek_voorkomen")["opp"].sum()
+        v_total = v_subs.sum()
+        v_sub: dict[str, float] = {}
+        for k, v in v_subs.items():
+            label = k if k in ("gesloten verharding", "open verharding") else "overig"
+            v_sub[label] = round(v_sub.get(label, 0.0) + float(v / v_total * 100), 1)
+
+        # Groen detail: groenvoorziening (openbaar) vs erf (privé) (% binnen groen)
+        g_gdf   = gdf[gdf["klasse"] == "groen"]
+        g_subs  = g_gdf.groupby("fysiek_voorkomen")["opp"].sum()
+        g_total = g_subs.sum()
+        g_sub: dict[str, float] = {}
+        for k, v in g_subs.items():
+            label = k if k in ("groenvoorziening", "erf") else "overig"
+            g_sub[label] = round(g_sub.get(label, 0.0) + float(v / g_total * 100), 1)
+
+        result[zone] = {
+            "klasse":         klasse_pct,
+            "verharding_sub": v_sub,
+            "groen_sub":      g_sub,
+        }
     return result
 
 
@@ -1786,8 +1811,8 @@ with tab_zones:
             "water":    "#38bdf8",
         }
         lc_rows = []
-        for zone_name, klassen in land_cover.items():
-            for klasse, pct in klassen.items():
+        for zone_name, lc_data in land_cover.items():
+            for klasse, pct in lc_data["klasse"].items():
                 lc_rows.append({"zone": zone_name, "klasse": klasse, "percentage": pct})
         lc_df = pd.DataFrame(lc_rows)
 
@@ -1822,7 +1847,7 @@ with tab_zones:
         _lc_temp_rows = []
         for zone_name in land_cover:
             zone_sub = z[z["zone"] == zone_name]["tempC_detrended"].dropna()
-            lc = land_cover[zone_name]
+            lc = land_cover[zone_name]["klasse"]
             if len(zone_sub):
                 _lc_temp_rows.append({
                     "Zone":              zone_name,
@@ -1836,6 +1861,91 @@ with tab_zones:
                 pd.DataFrame(_lc_temp_rows).set_index("Zone"),
                 use_container_width=True,
             )
+
+        # --- Verharding detail: gesloten vs open --------------------------
+        st.markdown("### 🏗️ Verharding: gesloten vs. open")
+        st.caption(
+            "Gesloten verharding (asfalt, tegels) absorbeert meer warmte en laat "
+            "geen water door — een directe drijfveer van het Urban Heat Island effect. "
+            "Open verharding (klinkers, grind) laat water door en koelt sneller af. "
+            "Percentages zijn berekend binnen het verharde oppervlak per zone."
+        )
+        _v_colours = {
+            "gesloten verharding": "#475569",
+            "open verharding":     "#94a3b8",
+            "overig":              "#cbd5e1",
+        }
+        _v_rows = []
+        for zone_name, lc_data in land_cover.items():
+            for sub, pct in lc_data["verharding_sub"].items():
+                _v_rows.append({"zone": zone_name, "type": sub, "percentage": pct})
+        fig_v = px.bar(
+            pd.DataFrame(_v_rows),
+            x="zone", y="percentage", color="type",
+            category_orders={
+                "zone": list(ZONE_COLOURS.keys()),
+                "type": ["gesloten verharding", "open verharding", "overig"],
+            },
+            color_discrete_map=_v_colours,
+            template="plotly_dark",
+            labels={"percentage": "% binnen verhard oppervlak", "zone": "", "type": ""},
+            text="percentage",
+        )
+        fig_v.update_traces(texttemplate="%{text:.0f}%", textposition="inside",
+                            textfont=dict(size=11))
+        fig_v.update_layout(
+            barmode="stack", height=300,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=10, b=10),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
+            xaxis=dict(gridcolor="#334155"),
+            yaxis=dict(gridcolor="#334155", range=[0, 102]),
+        )
+        st.plotly_chart(fig_v, use_container_width=True)
+
+        # --- Groen detail: groenvoorziening vs erf ------------------------
+        st.markdown("### 🌳 Groen: openbaar park vs. privétuin")
+        st.caption(
+            "Openbaar groen (groenvoorziening) omvat parken, plantsoen en bermen — "
+            "de plekken met bomen en grote aaneengesloten vegetatie die het sterkst "
+            "koelen via verdamping en schaduw. Privétuinen (erf) zijn versnipperd "
+            "en koelen minder effectief. "
+            "Percentages zijn berekend binnen het groene oppervlak per zone."
+        )
+        _g_colours = {
+            "groenvoorziening": "#16a34a",
+            "erf":              "#86efac",
+            "overig":           "#bbf7d0",
+        }
+        _g_rows = []
+        for zone_name, lc_data in land_cover.items():
+            for sub, pct in lc_data["groen_sub"].items():
+                _g_rows.append({"zone": zone_name, "type": sub, "percentage": pct})
+        fig_g = px.bar(
+            pd.DataFrame(_g_rows),
+            x="zone", y="percentage", color="type",
+            category_orders={
+                "zone": list(ZONE_COLOURS.keys()),
+                "type": ["groenvoorziening", "erf", "overig"],
+            },
+            color_discrete_map=_g_colours,
+            template="plotly_dark",
+            labels={"percentage": "% binnen groen oppervlak", "zone": "", "type": ""},
+            text="percentage",
+        )
+        fig_g.update_traces(texttemplate="%{text:.0f}%", textposition="inside",
+                            textfont=dict(size=11))
+        fig_g.update_layout(
+            barmode="stack", height=300,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=10, b=10),
+            legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                        bordercolor="#334155", borderwidth=1),
+            xaxis=dict(gridcolor="#334155"),
+            yaxis=dict(gridcolor="#334155", range=[0, 102]),
+        )
+        st.plotly_chart(fig_g, use_container_width=True)
 
 
 # ---- Correlaties ---------------------------------------------------------
