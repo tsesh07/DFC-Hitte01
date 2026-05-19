@@ -125,29 +125,16 @@ section[data-testid="stSidebar"] hr { border-color: #334155 !important; opacity:
 /* ── Dividers ───────────────────────────────────────────────────────────── */
 hr { border-color: #334155 !important; opacity: 1; }
 
-/* ── Gelijke hoogte voor kolommen in een rij ────────────────────────────── */
-div[data-testid="stHorizontalBlock"] {
-    align-items: stretch;
-}
-div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-    display: flex;
-    flex-direction: column;
-}
-div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
 /* ── Insight cards (custom HTML components) ─────────────────────────────── */
 .insight-card {
     background: #1e293b;
     border-radius: 12px;
     padding: 1.35rem 1.5rem;
     border-left: 4px solid #38bdf8;
-    flex: 1;
+    height: 185px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    overflow: hidden;
 }
 .insight-card:hover {
     transform: translateY(-3px);
