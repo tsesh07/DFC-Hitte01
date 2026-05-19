@@ -878,10 +878,10 @@ with col4:
     _most_groen   = max(_lc_rows_card, key=lambda x: x[2])
     if _most_verhard[0] == _most_groen[0]:
         lc_body = (
-            f"<strong>{_most_verhard[0]}</strong> heeft zowel het meeste verhard "
-            f"(<strong>{_most_verhard[1]:.0f}%</strong>) als het meeste groen "
-            f"(<strong>{_most_verhard[2]:.0f}%</strong>) op buurtniveau &mdash; "
-            f"het UHI-effect wordt hier eerder door asfalttype dan door groengebrek verklaard."
+            f"<strong>{_most_verhard[0]}</strong>: meeste verhard "
+            f"(<strong>{_most_verhard[1]:.0f}%</strong>) én meeste groen "
+            f"(<strong>{_most_verhard[2]:.0f}%</strong>). "
+            f"Het UHI-effect zit in het asfalttype, niet in groengebrek."
         )
     else:
         lc_body = (
