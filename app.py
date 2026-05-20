@@ -1661,6 +1661,80 @@ with tab_zones:
             )
             st.plotly_chart(fig_mean, use_container_width=True)
 
+        # --- Reproduceerbaarheid: Dag 1 vs Dag 4 -----------------------------
+        # Beide wandelingen: zelfde route + deksel dicht. We vergelijken het
+        # ruimtelijke patroon via de zone-anomalie (zone-gemiddelde minus
+        # sessiegemiddelde), zodat het verschil in absolute temperatuur tussen
+        # de twee dagen (ander weer) wegvalt en alleen de vorm overblijft.
+        _repro_pair = ["Dag 1 - deksel dicht", "Dag 4 - deksel dicht"]
+        if all(s in z["session"].unique() for s in _repro_pair):
+            st.markdown("### 🔁 Reproduceerbaarheid — Dag 1 vs Dag 4")
+            st.caption(
+                "Beide wandelingen hadden dezelfde route én deksel dicht. "
+                "Omdat de absolute temperatuur per dag verschilt (ander weer), "
+                "tonen we de **anomalie**: hoeveel warmer of koeler elke zone was "
+                "dan het gemiddelde van die wandeling. Herhaalt het patroon zich, "
+                "dan staan de balken per zone aan dezelfde kant van nul."
+            )
+            _anom_rows, _sign = [], {}
+            for s in _repro_pair:
+                sub = z[z["session"] == s]
+                s_mean = sub["tempC_detrended"].mean()
+                for zone_name in zone_order:
+                    zt = sub[sub["zone"] == zone_name]["tempC_detrended"].dropna()
+                    if len(zt):
+                        a = round(float(zt.mean() - s_mean), 2)
+                        _anom_rows.append({"zone": zone_name, "sessie": s, "anomalie": a})
+                        _sign.setdefault(zone_name, []).append(a)
+
+            fig_repro = px.bar(
+                pd.DataFrame(_anom_rows),
+                x="zone", y="anomalie", color="sessie", barmode="group",
+                category_orders={"zone": zone_order, "sessie": _repro_pair},
+                color_discrete_map=SESSION_COLOURS,
+                template="plotly_dark",
+                labels={"anomalie": "Afwijking van sessiegemiddelde (°C)",
+                        "zone": "", "sessie": ""},
+                text="anomalie",
+            )
+            fig_repro.update_traces(texttemplate="%{text:+.2f}", textposition="outside",
+                                    textfont=dict(size=11))
+            fig_repro.add_hline(y=0, line_color="#64748b", line_width=1)
+            fig_repro.update_layout(
+                height=360,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+                margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(gridcolor="#334155"),
+                yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
+                legend=dict(title="", bgcolor="rgba(30,41,59,0.85)",
+                            bordercolor="#334155", borderwidth=1),
+            )
+            st.plotly_chart(fig_repro, use_container_width=True)
+
+            # Verdict: welke zones herhalen zich (zelfde teken op beide dagen)?
+            _stable = [zn for zn, v in _sign.items()
+                       if len(v) == 2 and (v[0] > 0) == (v[1] > 0)]
+            _flip = [zn for zn in _sign if zn not in _stable and len(_sign[zn]) == 2]
+            if _stable:
+                _verdict = (
+                    f"**{', '.join(_stable)}** staat op beide dagen aan dezelfde kant "
+                    f"van het gemiddelde — dit deel van het patroon is reproduceerbaar."
+                )
+                if _flip:
+                    _verdict += (
+                        f" **{', '.join(_flip)}** wisselt van teken: dat verschil valt "
+                        f"binnen de meetruis en is dus níet robuust."
+                    )
+            else:
+                _verdict = ("Geen enkele zone staat op beide dagen aan dezelfde kant "
+                            "van het gemiddelde — het patroon is niet reproduceerbaar.")
+            st.markdown(
+                f"""<div style="background:#1e293b;border:1px solid #334155;
+                    border-radius:10px;padding:.9rem 1.2rem;margin-top:.4rem;
+                    color:#94a3b8;font-size:.9rem;line-height:1.6;">{_verdict}</div>""",
+                unsafe_allow_html=True,
+            )
+
         # --- Licht vs Temperatuur scatter --------------------------------
         st.markdown("**Licht vs temperatuur**")
         if is_compare:
