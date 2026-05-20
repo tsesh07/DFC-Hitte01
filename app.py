@@ -623,7 +623,8 @@ st.sidebar.markdown("---")
 st.sidebar.caption(
     "**Dag 1**: schone data-acquisitie.  \n"
     "**Dag 2**: intermittente USB-stroomstoringen — voorzichtig interpreteren.  \n"
-    "**Dag 3**: alleen GPS-track (BMP280 I2C-uitval)."
+    "**Dag 3**: alleen GPS-track (BMP280 I2C-uitval).  \n"
+    "**Dag 4**: schone replicatie van Dag 1 (deksel dicht, zelfde route)."
 )
 
 # --------------------------------------------------------------------------
