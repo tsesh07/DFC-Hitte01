@@ -676,14 +676,21 @@ df_sensor = df[~df["session"].isin(GPS_ONLY_SESSIONS)].copy()
 land_cover = load_land_cover()
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
-# Urban Heat Island index (drift-corrected): hardscape mean minus green canopy mean
-_hard_mean  = df_sensor[df_sensor["zone"].isin(["Museumplein", "Frans Halsbuurt"])]["tempC_detrended"].mean()
-_green_mean = df_sensor[df_sensor["zone"] == "Sarphatipark"]["tempC_detrended"].mean()
-uhi_index = (
-    round(float(_hard_mean - _green_mean), 2)
-    if (not np.isnan(_hard_mean) and not np.isnan(_green_mean))
-    else None
-)
+# Stedelijk hitte-contrast (drift-gecorrigeerd): hoeveel warmer de dichtst
+# bebouwde buurt (Frans Halsbuurt) is dan de andere zones. We berekenen dit
+# BINNEN elke wandeling en middelen daarna — zo valt het verschil in
+# basistemperatuur tussen de dagen (ander weer) weg en blijft alleen het
+# ruimtelijke signaal over. Pooling over dagen zou het signaal juist uitmiddelen.
+_HOT_ZONE     = "Frans Halsbuurt"
+_OTHER_ZONES  = ["Museumplein", "Sarphatipark"]
+_uhi_per_walk = []
+for _s in sensor_session_order:
+    _sub  = df_sensor[df_sensor["session"] == _s]
+    _hot  = _sub[_sub["zone"] == _HOT_ZONE]["tempC_detrended"].mean()
+    _rest = _sub[_sub["zone"].isin(_OTHER_ZONES)]["tempC_detrended"].mean()
+    if not np.isnan(_hot) and not np.isnan(_rest):
+        _uhi_per_walk.append(_hot - _rest)
+uhi_index = round(float(np.mean(_uhi_per_walk)), 2) if _uhi_per_walk else None
 
 session_order = [s for s in available_sessions if s in sessions]
 # Sensor-only subset: GPS-track sessies hebben geen bruikbare sensordata
@@ -902,14 +909,17 @@ with col4:
 if uhi_index is not None:
     _uhi_color   = "#ef4444" if uhi_index > 0 else "#10b981"
     _uhi_sign    = "warmer" if uhi_index > 0 else "koeler"
+    _n_walks = len(_uhi_per_walk)
     _uhi_context = (
-        f"Museumplein + Frans Halsbuurt is gemiddeld "
+        f"<strong>Frans Halsbuurt</strong> — de dichtst bebouwde buurt met smalle "
+        f"straten — was gemiddeld "
         f"<strong style='color:{_uhi_color}'>{abs(uhi_index):.2f} °C {_uhi_sign}</strong> "
-        f"dan Sarphatipark — berekend op drift-gecorrigeerde temperatuur. "
-        f"Op buurtniveau heeft Museumplein het hoogste aandeel verhard (42.6%) "
-        f"maar ook het meeste groen (32.8%); Sarphatipark heeft op buurtniveau "
-        f"minder groen (22.8%). Het verschil is daardoor eerder toe te schrijven "
-        f"aan het hoge asfaltaandeel dan aan afwezigheid van groen."
+        f"dan de andere zones. Berekend bínnen elke wandeling "
+        f"({_n_walks} sensor-wandeling{'en' if _n_walks != 1 else ''}) en daarna "
+        f"gemiddeld, zodat het weersverschil tussen dagen wegvalt. Dit wijst op een "
+        f"<em>urban-canyon-effect</em>: smalle straten en hoge bebouwing houden warmte "
+        f"vast. Het open, groene Museumplein is juist het koelst — ondanks de meeste "
+        f"verharding. Geometrie weegt hier dus zwaarder dan oppervlaktetype."
     )
     st.markdown(f"""
     <div style="background:#1e293b; border:1px solid #334155; border-radius:14px;
@@ -919,7 +929,7 @@ if uhi_index is not None:
       <div>
         <div style="color:#94a3b8; font-size:.85rem; font-weight:700;
                     text-transform:uppercase; letter-spacing:.07em; margin-bottom:.3rem;">
-          Urban Heat Island Index &nbsp;·&nbsp; drift-gecorrigeerd
+          Stedelijk hitte-contrast &nbsp;·&nbsp; binnen-wandeling, drift-gecorrigeerd
         </div>
         <div style="color:{_uhi_color}; font-size:2.1rem; font-weight:800; line-height:1.15;">
           {uhi_index:+.2f} °C
