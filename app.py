@@ -676,6 +676,11 @@ df_sensor = df[~df["session"].isin(GPS_ONLY_SESSIONS)].copy()
 land_cover = load_land_cover()
 df["tempC_anomaly"] = df["tempC"] - df["tempC"].mean()
 
+session_order = [s for s in available_sessions if s in sessions]
+# Sensor-only subset: GPS-track sessies hebben geen bruikbare sensordata
+sensor_session_order = [s for s in session_order if s not in GPS_ONLY_SESSIONS]
+is_compare = len(sensor_session_order) > 1
+
 # Stedelijk hitte-contrast (drift-gecorrigeerd): hoeveel warmer de dichtst
 # bebouwde buurt (Frans Halsbuurt) is dan de andere zones. We berekenen dit
 # BINNEN elke wandeling en middelen daarna — zo valt het verschil in
@@ -691,11 +696,6 @@ for _s in sensor_session_order:
     if not np.isnan(_hot) and not np.isnan(_rest):
         _uhi_per_walk.append(_hot - _rest)
 uhi_index = round(float(np.mean(_uhi_per_walk)), 2) if _uhi_per_walk else None
-
-session_order = [s for s in available_sessions if s in sessions]
-# Sensor-only subset: GPS-track sessies hebben geen bruikbare sensordata
-sensor_session_order = [s for s in session_order if s not in GPS_ONLY_SESSIONS]
-is_compare = len(sensor_session_order) > 1
 
 # --------------------------------------------------------------------------
 # KNMI-weerdata ophalen voor elke geselecteerde sessie
