@@ -219,6 +219,7 @@ SESSION_COLOURS = {
     "Dag 1 - deksel dicht": "#2563eb",
     "Dag 2 - deksel open":  "#f97316",
     "Dag 3 - GPS track":    "#10b981",
+    "Dag 4 - deksel dicht": "#a855f7",
 }
 
 # --------------------------------------------------------------------------

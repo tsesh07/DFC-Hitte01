@@ -17,6 +17,7 @@ SESSIONS = {
     "2026-05-06": "Dag 1 - deksel dicht",
     "2026-05-08": "Dag 2 - deksel open",
     "2026-05-18": "Dag 3 - GPS track",
+    "2026-05-20": "Dag 4 - deksel dicht",
 }
 
 # Sessies waarvoor alleen de GPS-route beschikbaar is (sensormeting defect).
@@ -57,6 +58,18 @@ SESSION_METADATA = {
         "rol_in_analyse":  "GPS-only — uitgesloten van sensor-analyse; "
                            "route zichtbaar op kaart als stippellijn",
     },
+    "Dag 4 - deksel dicht": {
+        "datum":           "2026-05-20",
+        "wandel_richting": "Sarphatipark → Frans Halsbuurt → Museumplein "
+                           "(zelfde richting als Dag 1)",
+        "deksel":          "Dicht (UV-/IR-attenuatie)",
+        "hardware_status": "Stabiel — Xtorm 35 Wh powerbank + USB-C, continue logging "
+                           "zonder onderbrekingen",
+        "bekende_issues":  "Geen — schoonste dataset tot nu toe (0 temperatuur-uitschieters, "
+                           "geen drukdropouts); ~3.5 min stilstaande warmup aan het begin weggeknipt",
+        "rol_in_analyse":  "Directe replicatie van Dag 1 (zelfde route + deksel dicht): "
+                           "toetst of het ruimtelijke patroon reproduceerbaar is",
+    },
 }
 
 # Wandel-vensters (gps_time als HHMMSS UTC) — knipt opwarming/idle weg.
@@ -69,6 +82,7 @@ WALK_WINDOWS = {
     "Dag 1 - deksel dicht": (121155, 130545),
     "Dag 2 - deksel open":  (110000, 122635),
     "Dag 3 - GPS track":    (130750, 141602),
+    "Dag 4 - deksel dicht": (115010, 133627),
 }
 
 
