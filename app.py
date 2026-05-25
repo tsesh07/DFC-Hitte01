@@ -450,6 +450,18 @@ def load_env_counts_per_buurt() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data(show_spinner=False)
+def load_buurten_buffer() -> gpd.GeoDataFrame:
+    """Gebufferde buurtgrenzen in WGS84 — voor weergave op de GPS-route-kaart.
+
+    Dit is hetzelfde gebied dat voor de bomen/panden-tellingen wordt gebruikt,
+    zodat zichtbaar wordt welk vlak de KPI's beslaan.
+    """
+    gdf = gpd.read_file(_ZONE_DIR / _BUURTEN_BUFFER_FILE)[["buurtnaam", "geometry"]].copy()
+    gdf["zone"] = gdf["buurtnaam"].map(_BUURT_TO_ZONE).fillna(gdf["buurtnaam"])
+    return gdf.to_crs(WGS84)
+
+
 def assign_zones_via_sjoin(df: pd.DataFrame, zones_gdf: gpd.GeoDataFrame) -> pd.Series:
     """Ruimtelijke join: voor elk monster zoeken we in welke zone-polygoon het valt."""
     valid = df["lat_dec"].notna() & df["lon_dec"].notna()
@@ -1583,6 +1595,29 @@ with tab_map:
                 showlegend=False,
             ))
 
+        # --- Gebufferde buurtgrenzen (amber omtrek) ---
+        # Dit is het gebied dat voor de bomen/panden-tellingen wordt gebruikt;
+        # de strakke gekleurde vlakken hierboven zijn de CBS-buurtgrenzen.
+        buffer_wgs84 = load_buurten_buffer()
+        _buf_legend_shown = False
+        for _, brow in buffer_wgs84.iterrows():
+            geom  = brow.geometry
+            parts = geom.geoms if geom.geom_type == "MultiPolygon" else [geom]
+            for part in parts:
+                bcoords = list(part.exterior.coords)
+                fig.add_trace(go.Scattermap(
+                    lat=[c[1] for c in bcoords],
+                    lon=[c[0] for c in bcoords],
+                    mode="lines",
+                    line=dict(color="#fbbf24", width=1.5),
+                    name="Buurt + buffer (telgebied)",
+                    legendgroup="buffer",
+                    showlegend=not _buf_legend_shown,
+                    hoverinfo="skip",
+                    opacity=0.8,
+                ))
+                _buf_legend_shown = True
+
         # Auto-zoom om de route te omsluiten
         center_lat = gps["lat_dec"].mean()
         center_lon = gps["lon_dec"].mean()
@@ -1617,7 +1652,9 @@ with tab_map:
 
         st.caption(
             "💡 Tip: scroll om in/uit te zoomen, sleep om te pannen. Klik op een sessie "
-            "in de legenda om hem te verbergen."
+            "in de legenda om hem te verbergen. De **gekleurde vlakken** zijn de strakke "
+            "CBS-buurtgrenzen; de **ambergele lijn** is dezelfde buurt mét buffer — het "
+            "gebied dat voor de bomen/panden-tellingen in de Omgevingsfactoren-tab is gebruikt."
         )
 
         # --- Snelheid-over-tijd grafiek ---------------------------------
@@ -2133,11 +2170,13 @@ with tab_env:
             st.metric("📏 Gem. hoogte",  f"{_r['gem_hoogte']:.1f} m")
 
     st.markdown("---")
-    st.markdown("### 🔬 Temperatuur vs. omgevingsfactor")
+    st.markdown("### 🔬 Omgevingsfactor vs. temperatuur")
     st.caption(
-        "Elke stip is één meting. De kleur toont de tweede factor (afstand of "
-        "hoogte). De stippellijn is een lineaire trend; **r** is de Pearson-"
-        "correlatie (−1…+1: teken = richting, grootte = sterkte van het verband)."
+        "Elke stip is één meting, **gekleurd op temperatuur** (rood = warm, "
+        "blauw = koel). Op de assen staan twee samenhangende omgevingsmaten "
+        "(aantal binnen straal vs. afstand/hoogte). Zo zie je waar in de omgeving "
+        "het warm of koel was. Onder elke plot staat de Pearson-correlatie **r** "
+        "tussen de temperatuur en de factor op de X-as."
     )
 
     with st.expander("ℹ️ Hoe lees ik de Pearson-correlatie (r)?"):
@@ -2162,40 +2201,40 @@ with tab_env:
             "*sterk effect* — bij veel meetpunten kan een zwakke r toch 'significant' zijn."
         )
 
-    def _env_scatter(xcol, color_col, x_label, color_label, kop, uitleg):
-        d = df_sensor.dropna(subset=["tempC_detrended", xcol, color_col])
+    def _env_scatter(xcol, ycol, x_label, y_label, kop, uitleg):
+        # X = omgevingsmaat (aantal/hoogte), Y = bijbehorende afstand/hoogte,
+        # kleur = temperatuur (intuïtief voor een hitte-onderzoek). De Pearson-r
+        # tussen temperatuur en de X-factor blijft in het bijschrift staan.
+        d = df_sensor.dropna(subset=["tempC_detrended", xcol, ycol])
         st.markdown(f"#### {kop}")
         if len(d) < 5 or d[xcol].std(skipna=True) in (0, np.nan):
             st.info("Te weinig variatie/data met de huidige sessie-selectie.")
             return
         r, _ = scipy_stats.pearsonr(d[xcol], d["tempC_detrended"])
         fig = px.scatter(
-            d, x=xcol, y="tempC_detrended", color=color_col,
-            color_continuous_scale="Turbo", opacity=0.7, template="plotly_dark",
-            labels={xcol: x_label,
-                    "tempC_detrended": "Temperatuur (°C, drift-gecorr.)",
-                    color_col: color_label},
+            d, x=xcol, y=ycol, color="tempC_detrended",
+            color_continuous_scale="RdYlBu_r", opacity=0.75, template="plotly_dark",
+            labels={xcol: x_label, ycol: y_label,
+                    "tempC_detrended": "Temp (°C)"},
         )
         fig.update_traces(marker=dict(size=7))
-        slope, intercept = np.polyfit(d[xcol], d["tempC_detrended"], 1)
-        xs = np.array([d[xcol].min(), d[xcol].max()])
-        fig.add_scatter(x=xs, y=slope * xs + intercept, mode="lines",
-                        line=dict(color="#f1f5f9", width=2, dash="dash"),
-                        name="trend", showlegend=False)
         fig.update_layout(
             height=430, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
             margin=dict(l=10, r=10, t=10, b=10),
             xaxis=dict(gridcolor="#334155"), yaxis=dict(gridcolor="#334155"),
-            coloraxis_colorbar=dict(title=color_label),
+            coloraxis_colorbar=dict(title="Temp °C"),
         )
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"{uitleg}  Pearson **r = {r:+.2f}** (n = {len(d):,}).")
+        st.caption(
+            f"{uitleg}  Samenhang temperatuur ↔ {x_label.lower()}: "
+            f"Pearson **r = {r:+.2f}** (n = {len(d):,})."
+        )
 
     _env_scatter(
         "aantal_bomen_25", "afstand_eerste_boom",
         f"Aantal bomen binnen {radius_bomen} m",
         "Afstand tot dichtstbijzijnde boom (m)",
-        "🌳 Temperatuur vs. aantal bomen",
+        "🌳 Bomen — aantal vs. nabijheid, gekleurd op temperatuur",
         "Meer bomen rondom → meer schaduw en verdampingskoeling, dus verwacht koeler.",
     )
     st.markdown("---")
@@ -2203,7 +2242,7 @@ with tab_env:
         "aantal_panden_50", "afstand_eerste_pand",
         f"Aantal panden binnen {radius_panden} m",
         "Afstand tot dichtstbijzijnde pand (m)",
-        "🏢 Temperatuur vs. aantal gebouwen",
+        "🏢 Gebouwen — aantal vs. nabijheid, gekleurd op temperatuur",
         "Meer panden → dichtere bebouwing, smallere straten en minder ventilatie "
         "(urban-canyon-effect).",
     )
@@ -2212,7 +2251,7 @@ with tab_env:
         "gem_pand_hoogte_50", "hoogte_eerste_pand",
         f"Gem. gebouwhoogte binnen {radius_panden} m (m)",
         "Hoogte dichtstbijzijnde pand (m)",
-        "📏 Temperatuur vs. gebouwhoogte",
+        "📏 Gebouwhoogte — gemiddeld vs. dichtstbijzijnd, gekleurd op temperatuur",
         "Hogere bebouwing houdt warmte langer vast, maar werpt overdag ook schaduw "
         "— het netto-effect is daarom niet op voorhand duidelijk.",
     )
