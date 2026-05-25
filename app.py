@@ -21,6 +21,7 @@ import streamlit as st
 
 # Statistische toetsen
 from scipy import stats as scipy_stats
+from scipy.spatial import cKDTree
 
 
 # Voor KNMI-API requests en OSM Overpass
@@ -286,6 +287,13 @@ _LAND_COVER_FILES = {
     "Sarphatipark":    "Sarphatiparkbuurt_opp.geojson",
 }
 
+# Omgevingsfactoren — bomen, gebouwen (met hoogte) en gebufferde buurtgrenzen.
+# Alle drie de bestanden staan in RD New (EPSG:28992) met punt-/polygoongeometrie.
+_BOMEN_FILE          = "bomen.geojson"               # boomlocaties (punten)
+_GEBOUWEN_FILE       = "gebouwen_met_hoogte.geojson" # pand-centroïden + hoogte
+_BUURTEN_BUFFER_FILE = "gekozen_buurten_metbuffer.geojson"
+_HOOGTE_COL          = "hoogte_2median"  # robuuste mediane pandhoogte (m)
+
 
 @st.cache_data(show_spinner=False)
 def build_zones_gdf() -> gpd.GeoDataFrame:
@@ -333,6 +341,113 @@ def load_land_cover() -> dict[str, dict]:
             "groen_sub":      g_sub,
         }
     return result
+
+
+@st.cache_data(show_spinner=False)
+def _load_env_points():
+    """Laad boom- en pandlocaties als RD New-coördinaten (meters) + pandhoogtes.
+
+    Bomen: alleen features met handmatig == 0 (zoals gevraagd — de handmatig
+    toegevoegde punten zijn minder betrouwbaar). Gebouwen: punt-centroïden met
+    mediane hoogte; negatieve hoogtes (data-artefacten) worden NaN.
+
+    Returns (tree_xy, bld_xy, bld_h) als numpy-arrays.
+    """
+    trees = gpd.read_file(_ZONE_DIR / _BOMEN_FILE)
+    trees = trees[trees["handmatig"] == 0].to_crs(RD_NEW)
+    tree_xy = np.column_stack([trees.geometry.x.values, trees.geometry.y.values])
+
+    bld = gpd.read_file(_ZONE_DIR / _GEBOUWEN_FILE).to_crs(RD_NEW)
+    bld_h = pd.to_numeric(bld[_HOOGTE_COL], errors="coerce")
+    bld_h = bld_h.where(bld_h >= 0)  # negatieve hoogtes → NaN
+    bld_xy = np.column_stack([bld.geometry.x.values, bld.geometry.y.values])
+    return tree_xy, bld_xy, bld_h.to_numpy()
+
+
+@st.cache_data(show_spinner="Omgevingsfactoren berekenen…")
+def compute_env_features(radius_bomen: int, radius_panden: int) -> pd.DataFrame:
+    """Bereken per meetpunt de omgevingsfactoren rond bomen en gebouwen.
+
+    Voor elk GPS-punt:
+      - aantal_bomen_25      : aantal bomen binnen `radius_bomen` m
+      - afstand_eerste_boom  : afstand (m) tot dichtstbijzijnde boom
+      - aantal_panden_50     : aantal panden binnen `radius_panden` m
+      - afstand_eerste_pand  : afstand (m) tot dichtstbijzijnde pand
+      - gem_pand_hoogte_50   : gem. hoogte (m) van panden binnen `radius_panden`
+      - hoogte_eerste_pand   : hoogte (m) van het dichtstbijzijnde pand
+
+    Berekend met cKDTree (beide lagen zijn punten in meters → exact en snel).
+    Geïndexeerd op de originele rij-index van load_data(), zodat we de kolommen
+    later met een join aan het dashboard-DataFrame kunnen koppelen. Gecachet op
+    de twee radii, zodat de schuifregelaars interactief blijven.
+    """
+    raw = load_data()
+    tree_xy, bld_xy, bld_h = _load_env_points()
+
+    valid = raw["lat_dec"].notna() & raw["lon_dec"].notna()
+    sub = raw.loc[valid]
+    pgdf = gpd.GeoDataFrame(
+        geometry=gpd.points_from_xy(sub["lon_dec"], sub["lat_dec"]),
+        crs=WGS84,
+    ).to_crs(RD_NEW)
+    pxy = np.column_stack([pgdf.geometry.x.values, pgdf.geometry.y.values])
+
+    tree_kd = cKDTree(tree_xy)
+    bld_kd  = cKDTree(bld_xy)
+
+    # Dichtstbijzijnde boom / pand
+    d_tree, _      = tree_kd.query(pxy, k=1)
+    d_bld,  i_bld  = bld_kd.query(pxy, k=1)
+
+    # Aantallen binnen straal
+    n_bomen  = tree_kd.query_ball_point(pxy, radius_bomen,  return_length=True)
+    bld_lists = bld_kd.query_ball_point(pxy, radius_panden)
+    n_panden = np.array([len(x) for x in bld_lists])
+    with np.errstate(invalid="ignore"):
+        gem_hoogte = np.array([
+            np.nanmean(bld_h[idx]) if len(idx) else np.nan for idx in bld_lists
+        ])
+
+    return pd.DataFrame({
+        "aantal_bomen_25":     n_bomen.astype(int),
+        "afstand_eerste_boom": d_tree.round(1),
+        "aantal_panden_50":    n_panden.astype(int),
+        "afstand_eerste_pand": d_bld.round(1),
+        "gem_pand_hoogte_50":  gem_hoogte.round(1),
+        "hoogte_eerste_pand":  np.round(bld_h[i_bld], 1),
+    }, index=sub.index)
+
+
+@st.cache_data(show_spinner=False)
+def load_env_counts_per_buurt() -> pd.DataFrame:
+    """Tel bomen en panden per (gebufferde) buurt voor de KPI-kaarten.
+
+    Gebruikt gekozen_buurten_metbuffer.geojson: de buffer zorgt dat bomen/panden
+    net buiten de strakke buurtgrens — die de straattemperatuur aan de rand wél
+    beïnvloeden — toch meetellen.
+    """
+    buurten = gpd.read_file(_ZONE_DIR / _BUURTEN_BUFFER_FILE)[["buurtnaam", "geometry"]]
+    buurten = buurten.to_crs(RD_NEW)
+    buurten["zone"] = buurten["buurtnaam"].map(_BUURT_TO_ZONE).fillna(buurten["buurtnaam"])
+
+    trees = gpd.read_file(_ZONE_DIR / _BOMEN_FILE)
+    trees = trees[trees["handmatig"] == 0].to_crs(RD_NEW)
+    bld = gpd.read_file(_ZONE_DIR / _GEBOUWEN_FILE).to_crs(RD_NEW)
+    bld["_h"] = pd.to_numeric(bld[_HOOGTE_COL], errors="coerce").where(lambda s: s >= 0)
+
+    tj = gpd.sjoin(trees, buurten, predicate="within")
+    bj = gpd.sjoin(bld,   buurten, predicate="within")
+
+    rows = []
+    for _, r in buurten.iterrows():
+        zone = r["zone"]
+        rows.append({
+            "zone":       zone,
+            "bomen":      int((tj["zone"] == zone).sum()),
+            "gebouwen":   int((bj["zone"] == zone).sum()),
+            "gem_hoogte": round(float(bj.loc[bj["zone"] == zone, "_h"].mean()), 1),
+        })
+    return pd.DataFrame(rows)
 
 
 def assign_zones_via_sjoin(df: pd.DataFrame, zones_gdf: gpd.GeoDataFrame) -> pd.Series:
@@ -614,6 +729,19 @@ drop_glitches = st.sidebar.toggle(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("**🌳 Omgevingsfactoren — zoekstralen**")
+radius_bomen = st.sidebar.slider(
+    "Straal bomen (m)", min_value=10, max_value=100, value=25, step=5,
+    help="Binnen deze straal tellen we het aantal bomen per meetpunt "
+         "(kolom aantal_bomen_25).",
+)
+radius_panden = st.sidebar.slider(
+    "Straal gebouwen (m)", min_value=10, max_value=150, value=50, step=5,
+    help="Binnen deze straal tellen we de panden en middelen we hun hoogte "
+         "(aantal_panden_50, gem_pand_hoogte_50).",
+)
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("**Geladen data**")
 for s in available_sessions:
     n = (raw["session"] == s).sum()
@@ -668,6 +796,12 @@ df = add_drift_correction(df)
 
 zones_gdf = build_zones_gdf()
 df["zone"] = assign_zones_via_sjoin(df, zones_gdf)
+
+# Omgevingsfactoren (bomen/gebouwen rond elk punt) toevoegen via index-join.
+# Berekend op de volledige load_data()-index, dus de join lijnt automatisch uit
+# met de gefilterde df. Rijen zonder GPS-fix krijgen NaN.
+env_features = compute_env_features(radius_bomen, radius_panden)
+df = df.join(env_features)
 
 # GPS-track sessies bevatten geen betrouwbare sensordata — apart houden zodat
 # alle sensor-analyses uitsluitend op Dag 1 / Dag 2 draaien.
@@ -1105,8 +1239,9 @@ st.divider()
 # --------------------------------------------------------------------------
 # Tabs
 # --------------------------------------------------------------------------
-tab_time, tab_map, tab_zones, tab_corr, tab_data = st.tabs(
-    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🔗 Correlaties", "📋 Ruwe data"]
+tab_time, tab_map, tab_zones, tab_env, tab_corr, tab_data = st.tabs(
+    ["📈 Tijdreeks", "🗺️ GPS-route", "🏛️ Zone-analyse", "🌳 Omgevingsfactoren",
+     "🔗 Correlaties", "📋 Ruwe data"]
 )
 
 # ---- Tijdreeks ----------------------------------------------------------
@@ -1970,6 +2105,95 @@ with tab_zones:
             yaxis=dict(gridcolor="#334155", range=[0, 102]),
         )
         st.plotly_chart(fig_g, use_container_width=True)
+
+
+# ---- Omgevingsfactoren ---------------------------------------------------
+with tab_env:
+    st.subheader("Bomen, gebouwen en gebouwhoogte rond elk meetpunt")
+    st.caption(
+        f"Voor elk GPS-punt tellen we de bomen binnen **{radius_bomen} m** en de "
+        f"panden binnen **{radius_panden} m**, plus de afstand tot het "
+        "dichtstbijzijnde object en de gebouwhoogte. De zoekstralen pas je aan in "
+        "de zijbalk. Temperatuur is drift-gecorrigeerd, zodat de sensor-opwarming "
+        "het ruimtelijke signaal niet vertroebelt."
+    )
+
+    # --- KPI's per (gebufferde) buurt --------------------------------------
+    env_counts = load_env_counts_per_buurt()
+    st.markdown("### 📊 Bomen & gebouwen per buurt")
+    st.caption("Geteld binnen de gebufferde buurtgrenzen "
+               "(`gekozen_buurten_metbuffer.geojson`) — de buffer pakt ook "
+               "objecten net buiten de strakke grens mee.")
+    _kpi_cols = st.columns(len(env_counts))
+    for _col, (_, _r) in zip(_kpi_cols, env_counts.iterrows()):
+        with _col:
+            st.markdown(f"**{_r['zone']}**")
+            st.metric("🌳 Bomen",        f"{int(_r['bomen']):,}")
+            st.metric("🏢 Gebouwen",     f"{int(_r['gebouwen']):,}")
+            st.metric("📏 Gem. hoogte",  f"{_r['gem_hoogte']:.1f} m")
+
+    st.markdown("---")
+    st.markdown("### 🔬 Temperatuur vs. omgevingsfactor")
+    st.caption(
+        "Elke stip is één meting. De kleur toont de tweede factor (afstand of "
+        "hoogte). De stippellijn is een lineaire trend; **r** is de Pearson-"
+        "correlatie (−1…+1: teken = richting, grootte = sterkte van het verband)."
+    )
+
+    def _env_scatter(xcol, color_col, x_label, color_label, kop, uitleg):
+        d = df_sensor.dropna(subset=["tempC_detrended", xcol, color_col])
+        st.markdown(f"#### {kop}")
+        if len(d) < 5 or d[xcol].std(skipna=True) in (0, np.nan):
+            st.info("Te weinig variatie/data met de huidige sessie-selectie.")
+            return
+        r, _ = scipy_stats.pearsonr(d[xcol], d["tempC_detrended"])
+        fig = px.scatter(
+            d, x=xcol, y="tempC_detrended", color=color_col,
+            color_continuous_scale="Turbo", opacity=0.7, template="plotly_dark",
+            labels={xcol: x_label,
+                    "tempC_detrended": "Temperatuur (°C, drift-gecorr.)",
+                    color_col: color_label},
+        )
+        fig.update_traces(marker=dict(size=7))
+        slope, intercept = np.polyfit(d[xcol], d["tempC_detrended"], 1)
+        xs = np.array([d[xcol].min(), d[xcol].max()])
+        fig.add_scatter(x=xs, y=slope * xs + intercept, mode="lines",
+                        line=dict(color="#f1f5f9", width=2, dash="dash"),
+                        name="trend", showlegend=False)
+        fig.update_layout(
+            height=430, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(gridcolor="#334155"), yaxis=dict(gridcolor="#334155"),
+            coloraxis_colorbar=dict(title=color_label),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(f"{uitleg}  Pearson **r = {r:+.2f}** (n = {len(d):,}).")
+
+    _env_scatter(
+        "aantal_bomen_25", "afstand_eerste_boom",
+        f"Aantal bomen binnen {radius_bomen} m",
+        "Afstand tot dichtstbijzijnde boom (m)",
+        "🌳 Temperatuur vs. aantal bomen",
+        "Meer bomen rondom → meer schaduw en verdampingskoeling, dus verwacht koeler.",
+    )
+    st.markdown("---")
+    _env_scatter(
+        "aantal_panden_50", "afstand_eerste_pand",
+        f"Aantal panden binnen {radius_panden} m",
+        "Afstand tot dichtstbijzijnde pand (m)",
+        "🏢 Temperatuur vs. aantal gebouwen",
+        "Meer panden → dichtere bebouwing, smallere straten en minder ventilatie "
+        "(urban-canyon-effect).",
+    )
+    st.markdown("---")
+    _env_scatter(
+        "gem_pand_hoogte_50", "hoogte_eerste_pand",
+        f"Gem. gebouwhoogte binnen {radius_panden} m (m)",
+        "Hoogte dichtstbijzijnde pand (m)",
+        "📏 Temperatuur vs. gebouwhoogte",
+        "Hogere bebouwing houdt warmte langer vast, maar werpt overdag ook schaduw "
+        "— het netto-effect is daarom niet op voorhand duidelijk.",
+    )
 
 
 # ---- Correlaties ---------------------------------------------------------
