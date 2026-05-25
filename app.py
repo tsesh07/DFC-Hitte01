@@ -2140,6 +2140,28 @@ with tab_env:
         "correlatie (−1…+1: teken = richting, grootte = sterkte van het verband)."
     )
 
+    with st.expander("ℹ️ Hoe lees ik de Pearson-correlatie (r)?"):
+        st.markdown(
+            "De **Pearson-correlatie (r)** meet hoe sterk twee getallen *lineair* "
+            "samenhangen — hier: de temperatuur tegenover een omgevingsfactor.\n\n"
+            "| r | Betekenis |\n"
+            "|---|---|\n"
+            "| **+1** | perfect: meer → evenredig warmer |\n"
+            "| **0** | geen lineair verband |\n"
+            "| **−1** | perfect omgekeerd: meer → evenredig koeler |\n\n"
+            "Twee dingen zitten in dat getal: het **teken** (+/−) is de *richting* "
+            "en de **grootte** (0→1) is hoe strak de punten op een lijn liggen. "
+            "Vuistregel: **0.1 = zwak, 0.3 = matig, 0.5 = sterk**.\n\n"
+            "**Let op bij het interpreteren:**\n"
+            "- r ziet alléén rechte verbanden — kijk dus ook naar de *vorm* in de plot.\n"
+            "- Correlatie is geen oorzaak: een verband kan meelopen met andere "
+            "factoren (smalle straten, wind, tijd van de dag).\n"
+            "- Meerdere wandelingen samen voegen ruis toe (ander weer per dag). "
+            "Kies in de zijbalk één sessie voor een schoner verband.\n"
+            "- Een lage p-waarde betekent *waarschijnlijk niet toeval*, niet "
+            "*sterk effect* — bij veel meetpunten kan een zwakke r toch 'significant' zijn."
+        )
+
     def _env_scatter(xcol, color_col, x_label, color_label, kop, uitleg):
         d = df_sensor.dropna(subset=["tempC_detrended", xcol, color_col])
         st.markdown(f"#### {kop}")
