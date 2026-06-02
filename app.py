@@ -1987,8 +1987,7 @@ with tab_zones:
         st.plotly_chart(fig_tl, use_container_width=True)
         st.caption(
             "Als zones in volgorde bezocht zijn (niet door elkaar), kan een deel van het "
-            "temperatuurverschil tijd-van-dag zijn in plaats van locatie. Vermeld dit "
-            "voorbehoud in je discussie."
+            "temperatuurverschil tijd-van-dag zijn in plaats van locatie."
         )
 
         # --- Bodemgebruik per zone ----------------------------------------
