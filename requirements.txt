@@ -6,3 +6,6 @@ shapely
 plotly
 scipy
 statsmodels
+rasterio
+seaborn
+matplotlib
