@@ -8,12 +8,11 @@ from rasterio.fill import fillnodata
 import plotly.express as px
 from pathlib import Path
 
-# Pad-helper: __file__ → pages/2_🗺️_Interpolatie.py, .parents[1] = project-root.
+# Pad-helper: __file__ → views/Interpolatie.py, .parents[1] = project-root.
 APP_ROOT = Path(__file__).resolve().parents[1]
 GEOJSON_PATH = APP_ROOT / "data" / "processed" / "DATA_gefilterd_amersfoort.geojson"
 
-# 1. Streamlit pagina configuratie
-st.set_page_config(page_title="Geospatiale Interpolatie & Validatie", layout="wide")
+# Pagina-config wordt centraal in app.py geregeld (st.navigation-router).
 
 st.title("🗺️ Interpolatie")
 st.markdown("Kies een datum en test-split om de interpolatie te berekenen en de nauwkeurigheid te valideren.")

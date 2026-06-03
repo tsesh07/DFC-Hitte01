@@ -8,14 +8,13 @@ import seaborn as sns            # Voor de lichte statische plots
 import matplotlib.pyplot as plt  # Nodig voor het donkere thema en sluiten van figuren
 from pathlib import Path
 
-# Pad-helpers: __file__ → pages/1_🔗_Correlaties.py, .parents[1] = project-root.
+# Pad-helpers: __file__ → views/Correlaties.py, .parents[1] = project-root.
 # Zo werkt alles ongeacht de CWD waarvandaan Streamlit start.
 APP_ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH       = APP_ROOT / "data" / "processed" / "DATA_na_5e_meting_interpolatie.csv"
 BUURTEN_GEOJSON = APP_ROOT / "data" / "zone"      / "gekozen_buurten_metbuffer.geojson"
 
-# 1. Pagina configuratie
-st.set_page_config(page_title="Temperatuur data Dashboard", layout="wide")
+# Pagina-config wordt centraal in app.py geregeld (st.navigation-router).
 st.markdown("""<style>[data-testid="stHeader"] {background: rgba(0,0,0,0);height: 0rem;position: fixed;z-index: 999;}[data-testid="stHeader"] [data-testid="stActionButton"] {display: none;}.block-container {padding-top: 0rem;padding-bottom: 0rem;margin-top: -2rem;}[data-testid="stSidebarUserContent"] {padding-top: 1rem;}</style>""", unsafe_allow_html=True)
 
 # ==============================================================================
