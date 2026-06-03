@@ -56,6 +56,13 @@ def load_data():
 
         gdf_joined = gpd.sjoin(gdf_punten, gdf_buurten, how='left', predicate='within')
 
+        # De gebufferde buurtgrenzen overlappen elkaar aan de randen, waardoor
+        # één meetpunt aan meerdere buurten kan worden gekoppeld. sjoin geeft
+        # dan twee rijen met dezelfde index — die zorgen later bij toewijzing
+        # voor 'cannot reindex on an axis with duplicate labels'. We houden per
+        # punt alleen de eerste match.
+        gdf_joined = gdf_joined[~gdf_joined.index.duplicated(keep='first')]
+
         # Aangepast naar jouw nieuwe kolomnaam 'buurtname'
         buurt_kolomnaam_in_geojson = 'buurtnaam'
 
