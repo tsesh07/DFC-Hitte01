@@ -15,7 +15,11 @@ CSV_PATH       = APP_ROOT / "data" / "processed" / "DATA_na_5e_meting_interpolat
 BUURTEN_GEOJSON = APP_ROOT / "data" / "zone"      / "gekozen_buurten_metbuffer.geojson"
 
 # Pagina-config wordt centraal in app.py geregeld (st.navigation-router).
-st.markdown("""<style>[data-testid="stHeader"] {background: rgba(0,0,0,0);height: 0rem;position: fixed;z-index: 999;}[data-testid="stHeader"] [data-testid="stActionButton"] {display: none;}.block-container {padding-top: 0rem;padding-bottom: 0rem;margin-top: -2rem;}[data-testid="stSidebarUserContent"] {padding-top: 1rem;}</style>""", unsafe_allow_html=True)
+# De originele CSS gebruikte 'margin-top: -2rem', wat de inhoud onder de
+# (verborgen) header omhoogtrok en bovenaan afkapte zodra de pagina in de
+# multipage-router draait. Vervangen door positieve top-padding zodat de
+# titel/tabbladen netjes vrijkomen.
+st.markdown("""<style>[data-testid="stHeader"] {background: rgba(0,0,0,0);height: 0rem;position: fixed;z-index: 999;}[data-testid="stHeader"] [data-testid="stActionButton"] {display: none;}.block-container {padding-top: 3rem;padding-bottom: 0rem;}[data-testid="stSidebarUserContent"] {padding-top: 1rem;}</style>""", unsafe_allow_html=True)
 
 # ==============================================================================
 # 2. DATA INLADEN EN VOORBEWERKEN
