@@ -102,6 +102,11 @@ def _repair_corrupt_timestamps(df: pd.DataFrame) -> pd.DataFrame:
     Deze rijen vallen binnen de Dag-2-wandeling, dus reconstrueren we ze als
     2026-05-08 + HH:MM:SS uit gps_time. De gps_time-kolom komt rechtstreeks
     van de GPS-module en is niet aangetast door de RTC-storing.
+
+    BELANGRIJK: gps_time staat in UTC, terwijl alle overige timestamps in
+    lokale tijd (CEST = UTC+2) staan. We tellen daarom 2 uur op, anders landen
+    de gerepareerde rijen 2 uur te vroeg (bv. 11:17 i.p.v. 13:17), wat de
+    sessieduur en de tijdreeks vervuilt.
     """
     bad = df["timestamp"].astype(str).str.startswith("2001")
     if not bad.any():
@@ -111,7 +116,10 @@ def _repair_corrupt_timestamps(df: pd.DataFrame) -> pd.DataFrame:
         if pd.isna(g):
             return None
         g = int(g)
-        return f"2026-05-08 {g//10000:02d}:{(g//100)%100:02d}:{g%100:02d}"
+        h, m, s = g // 10000, (g // 100) % 100, g % 100
+        # UTC -> lokale tijd (CEST); Timedelta vangt een eventuele uur-overloop op.
+        t = pd.Timestamp("2026-05-08") + pd.Timedelta(hours=h + 2, minutes=m, seconds=s)
+        return t.strftime("%Y-%m-%d %H:%M:%S")
 
     df.loc[bad, "timestamp"] = df.loc[bad, "gps_time"].apply(_build)
     return df
