@@ -154,10 +154,10 @@ plot_opties = [c for c in alle_numeriek if c not in negeer_cols]
 # ==============================================================================
 # TABS AANMAKEN
 # ==============================================================================
-tab1, tab2, tab3 = st.tabs([
-    "📈 Dashboard",
+tab2, tab3, tab1 = st.tabs([
     "🔍 Interactief Scatter Analyse",
-    "📊 Alle Correlaties (Seaborn)"
+    "📊 Alle Correlaties (Seaborn)",
+    "📈 Dashboard",
 ])
 
 # ------------------------------------------------------------------------------
@@ -342,16 +342,17 @@ with tab1:
         # Drop NaN waarden voor de plot
         df_boxplot = df_boxplot.dropna(subset=['tempC_clean', 'temp_av_stdv', 'buurt'])
 
-        # --- BOXPLOT 1: Schone Temperatuur (°C) ---
+        # --- BOXPLOT 1: Schone Temperatuur (°C) — alleen de geselecteerde dag ---
         fig_box = px.box(
-            df_boxplot,
+            df_dag,
             x='buurt',
             y='tempC_clean',
             points="all",
-            title="Temperatuur spreiding per buurt voor 6, 8 en 20 mei 2026 (Samen)",
+            title=f"Temperatuur spreiding per buurt voor {gekozen_dag}",
             labels={'buurt': 'Buurten', 'tempC_clean': 'Temperatuur (°C)'},
             color='buurt',
-            color_discrete_sequence=px.colors.qualitative.Bold
+            color_discrete_sequence=px.colors.qualitative.Bold,
+            hover_data=['lon', 'lat']
         )
         fig_box.update_layout(height=600, xaxis_title="Buurt", yaxis_title="Temperatuur (°C)", showlegend=False)
         fig_box.update_yaxes(tickfont=dict(size=20), title_font=dict(size=20))
