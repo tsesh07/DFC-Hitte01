@@ -1739,6 +1739,15 @@ with tab_zones:
 
         # --- Boxplot van temperatuur -------------------------------------
         st.markdown("**Temperatuurverdeling per zone**")
+        # Y-as: temperatuur t.o.v. de mediaan van diezelfde dag. Door per dag
+        # de dagmediaan af te trekken, vallen de weersverschillen tussen dagen
+        # weg en zijn alle wandelingen op één schaal vergelijkbaar. De dagmediaan
+        # zelf ligt dan op 0; zones erboven waren die dag warmer dan typisch.
+        z = z.copy()
+        z["temp_vs_dagmediaan"] = (
+            z["tempC"] - z.groupby("session")["tempC"].transform("median")
+        )
+        _y_label = "Temperatuur t.o.v. dagmediaan (°C)"
         _box_base = dict(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
             margin=dict(l=10, r=10, t=10, b=10),
@@ -1749,51 +1758,45 @@ with tab_zones:
         )
         if is_compare:
             fig_box = px.box(
-                z, x="zone", y="tempC", color="session",
+                z, x="zone", y="temp_vs_dagmediaan", color="session",
                 category_orders={"zone": zone_order, "session": sensor_session_order},
                 color_discrete_map=SESSION_COLOURS,
                 points="all",
                 template="plotly_dark",
-                labels={"tempC": "Temperatuur (°C)", "zone": "", "session": ""},
+                labels={"temp_vs_dagmediaan": _y_label, "zone": "", "session": ""},
             )
             fig_box.update_layout(**_box_base, boxmode="group", height=420)
         else:
             fig_box = px.box(
-                z, x="zone", y="tempC", color="zone",
+                z, x="zone", y="temp_vs_dagmediaan", color="zone",
                 category_orders={"zone": zone_order},
                 color_discrete_map=ZONE_COLOURS,
                 points="all",
                 template="plotly_dark",
-                labels={"tempC": "Temperatuur (°C)", "zone": ""},
+                labels={"temp_vs_dagmediaan": _y_label, "zone": ""},
             )
             fig_box.update_layout(**_box_base, showlegend=False, height=400)
 
-        # Mediaan-temperatuur per dag als horizontale referentielijn(en). Zo zie
-        # je hoe elke zone-verdeling ligt t.o.v. het dagniveau (= het weer).
-        for s in sensor_session_order:
-            _mv = z[z["session"] == s]["tempC"].dropna()
-            if len(_mv):
-                fig_box.add_hline(
-                    y=float(_mv.median()),
-                    line_dash="dot", line_width=2,
-                    line_color=SESSION_COLOURS.get(s, "#94a3b8"),
-                    annotation_text=f"mediaan {s.split(' - ')[0]}: {_mv.median():.1f}°C",
-                    annotation_position="top left",
-                    annotation_font_size=11,
-                    annotation_font_color=SESSION_COLOURS.get(s, "#94a3b8"),
-                )
+        # De dagmediaan ligt per definitie op 0 — één referentielijn volstaat nu.
+        fig_box.add_hline(
+            y=0, line_dash="dot", line_width=2, line_color="#94a3b8",
+            annotation_text="dagmediaan (0)", annotation_position="top left",
+            annotation_font_size=11, annotation_font_color="#94a3b8",
+        )
         st.plotly_chart(fig_box, use_container_width=True)
 
         if is_compare:
             st.caption(
-                "De **stippellijnen** tonen de mediaan-temperatuur per dag (het "
-                "dagniveau, ≈ het weer). Een zone die in beide sessies bóven of "
-                "ónder zijn eigen daglijn ligt, is een robuuste ruimtelijke bevinding."
+                "De y-as toont de temperatuur **t.o.v. de mediaan van diezelfde dag**, "
+                "zodat de weersverschillen tussen dagen wegvallen en de wandelingen "
+                "vergelijkbaar zijn. Een zone die in beide sessies bóven de nullijn "
+                "ligt, was structureel warmer dan typisch — een robuuste ruimtelijke "
+                "bevinding."
             )
         else:
             st.caption(
-                "De **stippellijn** toont de mediaan-temperatuur van deze dag; "
-                "zones erboven waren warmer dan typisch, eronder koeler."
+                "De y-as toont de temperatuur **t.o.v. de mediaan van deze dag**. "
+                "Zones boven de nullijn waren warmer dan typisch, eronder koeler."
             )
 
         # --- Gemiddelde temperatuur per zone ---------------------------------
