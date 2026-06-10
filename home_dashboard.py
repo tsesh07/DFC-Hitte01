@@ -1786,12 +1786,10 @@ with tab_zones:
         st.plotly_chart(fig_box, use_container_width=True)
 
         if is_compare:
-            st.caption(
-                "De y-as toont de temperatuur **t.o.v. de mediaan van diezelfde dag**, "
-                "zodat de weersverschillen tussen dagen wegvallen en de wandelingen "
-                "vergelijkbaar zijn. Een zone die in beide sessies bóven de nullijn "
-                "ligt, was structureel warmer dan typisch — een robuuste ruimtelijke "
-                "bevinding."
+            st.info(
+                "Dag 1 is het meest representatief: hier zie je dat Museumplein het "
+                "hoogste is en Sarphatipark het laagst, en Frans Halsbuurt zit er "
+                "tussenin."
             )
         else:
             st.caption(
