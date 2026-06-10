@@ -2196,6 +2196,16 @@ with tab_env:
             "*sterk effect* — bij veel meetpunten kan een zwakke r toch 'significant' zijn."
         )
 
+    # Toggle: kleurschaal centreren op de mediaan-temperatuur. De mediaan wordt
+    # dan de neutrale middenkleur, zodat je direct ziet welke punten warmer of
+    # koeler zijn dan 'typisch' — robuuster dan het gemiddelde tegen uitschieters.
+    kleur_op_mediaan = st.toggle(
+        "🎨 Kleur centreren op de mediaan-temperatuur",
+        value=False,
+        help="De mediaan wordt de middenkleur van de gradient (geel); warmer dan "
+             "de mediaan kleurt rood, koeler kleurt blauw.",
+    )
+
     def _env_scatter(xcol, ycol, x_label, y_label, kop, uitleg):
         # X = omgevingsmaat (aantal/hoogte), Y = bijbehorende afstand/hoogte,
         # kleur = temperatuur (intuïtief voor een hitte-onderzoek). De Pearson-r
@@ -2206,23 +2216,35 @@ with tab_env:
             st.info("Te weinig variatie/data met de huidige sessie-selectie.")
             return
         r, _ = scipy_stats.pearsonr(d[xcol], d["tempC_detrended"])
+        # Mediaan van déze grafiek (matcht de getoonde punten). Wordt het
+        # midpunt van de gradient als de toggle aanstaat.
+        temp_mediaan = float(d["tempC_detrended"].median())
         fig = px.scatter(
             d, x=xcol, y=ycol, color="tempC_detrended",
             color_continuous_scale="RdYlBu_r", opacity=0.75, template="plotly_dark",
+            color_continuous_midpoint=temp_mediaan if kleur_op_mediaan else None,
             labels={xcol: x_label, ycol: y_label,
                     "tempC_detrended": "Temp (°C)"},
         )
         fig.update_traces(marker=dict(size=7))
+        _cbar = dict(title="Temp °C")
+        if kleur_op_mediaan:
+            # Markeer de mediaan expliciet op de kleurbalk
+            _cbar["tickvals"] = [temp_mediaan]
+            _cbar["ticktext"] = [f"mediaan {temp_mediaan:.1f}°C"]
         fig.update_layout(
             height=430, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
             margin=dict(l=10, r=10, t=10, b=10),
             xaxis=dict(gridcolor="#334155"), yaxis=dict(gridcolor="#334155"),
-            coloraxis_colorbar=dict(title="Temp °C"),
+            coloraxis_colorbar=_cbar,
         )
         st.plotly_chart(fig, use_container_width=True)
+        _med_txt = (f"  Kleur gecentreerd op de mediaan ({temp_mediaan:.1f}°C): "
+                    f"rood = warmer, blauw = koeler dan typisch."
+                    if kleur_op_mediaan else "")
         st.caption(
             f"{uitleg}  Samenhang temperatuur ↔ {x_label.lower()}: "
-            f"Pearson **r = {r:+.2f}** (n = {len(d):,})."
+            f"Pearson **r = {r:+.2f}** (n = {len(d):,}).{_med_txt}"
         )
 
     _env_scatter(
