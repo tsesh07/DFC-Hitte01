@@ -1767,13 +1767,33 @@ with tab_zones:
                 labels={"tempC": "Temperatuur (°C)", "zone": ""},
             )
             fig_box.update_layout(**_box_base, showlegend=False, height=400)
+
+        # Mediaan-temperatuur per dag als horizontale referentielijn(en). Zo zie
+        # je hoe elke zone-verdeling ligt t.o.v. het dagniveau (= het weer).
+        for s in sensor_session_order:
+            _mv = z[z["session"] == s]["tempC"].dropna()
+            if len(_mv):
+                fig_box.add_hline(
+                    y=float(_mv.median()),
+                    line_dash="dot", line_width=2,
+                    line_color=SESSION_COLOURS.get(s, "#94a3b8"),
+                    annotation_text=f"mediaan {s.split(' - ')[0]}: {_mv.median():.1f}°C",
+                    annotation_position="top left",
+                    annotation_font_size=11,
+                    annotation_font_color=SESSION_COLOURS.get(s, "#94a3b8"),
+                )
         st.plotly_chart(fig_box, use_container_width=True)
 
         if is_compare:
             st.caption(
-                "Als dezelfde zone-volgorde geldt over beide sessies (bv. Frans Halsbuurt "
-                "het warmst in beide, Sarphatipark het koelst in beide), dan zijn de ruimtelijke "
-                "bevinding robuust voor de wijziging in methodologie."
+                "De **stippellijnen** tonen de mediaan-temperatuur per dag (het "
+                "dagniveau, ≈ het weer). Een zone die in beide sessies bóven of "
+                "ónder zijn eigen daglijn ligt, is een robuuste ruimtelijke bevinding."
+            )
+        else:
+            st.caption(
+                "De **stippellijn** toont de mediaan-temperatuur van deze dag; "
+                "zones erboven waren warmer dan typisch, eronder koeler."
             )
 
         # --- Gemiddelde temperatuur per zone ---------------------------------
@@ -1838,46 +1858,6 @@ with tab_zones:
                             bordercolor="#334155", borderwidth=1),
             )
             st.plotly_chart(fig_mean, use_container_width=True)
-
-        # --- Mediaan-temperatuur per dag -------------------------------------
-        st.markdown("### 📅 Mediaan-temperatuur per dag")
-        st.caption(
-            "De mediane gemeten temperatuur per wandeling — robuust tegen "
-            "uitschieters en sensor-pieken. Verschillen tussen dagen weerspiegelen "
-            "vooral het weer (ander basisniveau), niet de stad zelf. Respecteert "
-            "de filters hierboven."
-        )
-        _med_rows = []
-        for s in sensor_session_order:
-            vals = z[z["session"] == s]["tempC"].dropna()
-            if len(vals):
-                _med_rows.append({
-                    "sessie":   s,
-                    "mediaan":  round(float(vals.median()), 2),
-                    "n":        len(vals),
-                })
-        if _med_rows:
-            _med_df = pd.DataFrame(_med_rows)
-            fig_med_dag = px.bar(
-                _med_df, x="sessie", y="mediaan", color="sessie",
-                category_orders={"sessie": sensor_session_order},
-                color_discrete_map=SESSION_COLOURS,
-                template="plotly_dark",
-                labels={"mediaan": "Mediaan-temperatuur (°C)", "sessie": ""},
-                text="mediaan",
-            )
-            fig_med_dag.update_traces(texttemplate="%{text:.1f} °C",
-                                      textposition="outside", textfont=dict(size=12))
-            fig_med_dag.update_layout(
-                height=320, showlegend=False,
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#1e293b",
-                margin=dict(l=10, r=10, t=30, b=10),
-                xaxis=dict(gridcolor="#334155"),
-                yaxis=dict(gridcolor="#334155"),
-            )
-            st.plotly_chart(fig_med_dag, use_container_width=True)
-        else:
-            st.info("Geen temperatuurdata voor de huidige filters.")
 
         # --- Reproduceerbaarheid: Dag 1 vs Dag 4 -----------------------------
         # Beide wandelingen: zelfde route + deksel dicht. We vergelijken het
